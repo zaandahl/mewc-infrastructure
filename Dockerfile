@@ -7,7 +7,7 @@ ENV ANSIBLE_VERSION=4.1.0
 
 # Install necessary packages
 RUN apt-get update && \
-    apt-get install -y curl unzip gcc libffi-dev libssl-dev && \
+    apt-get install -y curl unzip gcc libffi-dev libssl-dev openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Terraform
