@@ -1,0 +1,9 @@
+version: '3'
+services:
+  mewc_infra_setup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    working_dir: /app
