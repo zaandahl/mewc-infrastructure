@@ -25,4 +25,4 @@ RUN pip install python-openstackclient python-glanceclient python-ironicclient p
 RUN terraform -v && ansible --version && openstack --version
 
 # Set the default command
-CMD ["/bin/bash"]
+CMD ["tail", "-f", "/dev/null"]

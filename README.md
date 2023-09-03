@@ -16,7 +16,7 @@ docker-compose up -d
 
 3. You can then access the container's shell with:
 ```
-docker-compose exec mewc_infra bash
+docker-compose exec mewc_infra_setup bash
 ```
 
 ## Generating OpenStack Key Pair
