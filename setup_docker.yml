@@ -1,0 +1,35 @@
+---
+- hosts: all
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: /app/keys/mewc-key
+  become: yes
+  tasks:
+  - name: Add 'ubuntu' user to 'docker' group
+    user:
+      name: ubuntu
+      groups: docker
+      append: yes
+  - name: Install necessary Python packages for Docker module
+    apt:
+      name:
+        - python3-pip
+      state: present
+  - name: Install Docker SDK for Python
+    pip:
+      name: docker
+      state: present
+  - name: Notify user about the next task
+    debug:
+      msg: "Pulling the Docker images will take a while, go enjoy a coffee..."
+  - name: Pull required Docker images
+    docker_image:
+      name: "{{ item }}"
+      source: pull
+    loop:
+      - zaandahl/megadetector:latest
+      - zaandahl/mewc-snip:latest
+      - zaandahl/mewc-box:latest
+      - zaandahl/mewc-exif:latest
+      - zaandahl/en-predict:latest
+      # Add other images as needed

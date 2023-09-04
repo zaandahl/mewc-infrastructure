@@ -27,3 +27,46 @@
         src: /dev/vdb
         fstype: ext4
         state: mounted
+
+    - name: Change ownership of mounted directory to ubuntu
+      file:
+        path: /mnt/mewc-volume
+        owner: ubuntu
+        group: ubuntu
+        state: directory
+        recurse: yes
+
+    # Stop Docker service
+    - name: Stop Docker service
+      systemd:
+        name: docker
+        state: stopped
+
+    # Move the Docker data directory to the new volume
+    - name: Move Docker's data directory to the new volume
+      command: mv /var/lib/docker /mnt/mewc-volume/
+
+    # Ensure Docker's new data directory exists (precautionary)
+    - name: Ensure Docker's new data directory exists
+      file:
+        path: /mnt/mewc-volume/docker
+        state: directory
+
+    # Modify Docker's systemd service file
+    - name: Point Docker to the new data directory
+      lineinfile:
+        path: /lib/systemd/system/docker.service
+        regexp: '^ExecStart='
+        line: 'ExecStart=/usr/bin/dockerd --data-root=/mnt/mewc-volume/docker -H fd://'
+      register: docker_service_changed
+
+    # Reload the systemd configuration
+    - name: Reload systemd configuration
+      command: systemctl daemon-reload
+      when: docker_service_changed.changed
+
+    # Start Docker
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
