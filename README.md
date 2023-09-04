@@ -142,3 +142,16 @@ The private key (`mewc-key.pem`) should be kept secure - treat it like a passwor
 
 Also, remember to add the public key (`mewc-key.pem.pub`) to any new instances you create if you want to be able to connect to them with the associated private key.
 
+## Access volume and object storage using CyberDuck
+Download the CyberDuck client from https://cyberduck.io/download/
+
+To upload to volumne storage you just need to connect to the instance. You can find the IP address of the instance in the Nectar dashboard.
+Use SFTP to connect with a username of ubuntu and the private key you generated before.
+
+For object storage (S3) follow instructions on the Nectar page https://tutorials.rc.nectar.org.au/object-storage/04-object-storage-cyberduck
+
+They key point is to download the Nectar CyberDuck profile and enter your OpenStack credentials that you created before in your nectar.env file.
+
+Your credentials will look something like this: projectname:Default:your.username@domain.com
+Project name is from OS_PROJECT_NAME, Default is from OS_USER_DOMAIN_NAME
+You enter your OS_PASSWORD as the password.

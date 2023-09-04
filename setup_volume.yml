@@ -1,0 +1,29 @@
+---
+- hosts: all
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: /app/keys/mewc-key
+  become: yes
+  tasks:
+    - name: Ensure the directory for mounting exists
+      file:
+        path: /mnt/mewc-volume
+        state: directory
+
+    - name: Check if the volume has a filesystem
+      command: file -s /dev/vdb
+      register: volume_check
+      changed_when: false
+
+    - name: Format the volume with ext4
+      filesystem:
+        fstype: ext4
+        dev: /dev/vdb
+      when: "'/dev/vdb: data' in volume_check.stdout"
+
+    - name: Mount the volume
+      mount:
+        path: /mnt/mewc-volume
+        src: /dev/vdb
+        fstype: ext4
+        state: mounted
