@@ -155,3 +155,11 @@ They key point is to download the Nectar CyberDuck profile and enter your OpenSt
 Your credentials will look something like this: projectname:Default:your.username@domain.com
 Project name is from OS_PROJECT_NAME, Default is from OS_USER_DOMAIN_NAME
 You enter your OS_PASSWORD as the password.
+
+## Creating a sftp user with access to a specific directory
+
+You can use mkpasswd to create a password for the user:
+
+```bash
+mkpasswd -m sha-512
+```

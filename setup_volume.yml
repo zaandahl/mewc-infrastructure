@@ -28,14 +28,6 @@
         fstype: ext4
         state: mounted
 
-    - name: Change ownership of mounted directory to ubuntu
-      file:
-        path: /mnt/mewc-volume
-        owner: ubuntu
-        group: ubuntu
-        state: directory
-        recurse: yes
-
     # Stop Docker service
     - name: Stop Docker service
       systemd:

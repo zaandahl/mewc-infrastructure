@@ -25,13 +25,14 @@ if [ "$1" == "apply" ]; then
     instance_ip=$(terraform output -raw instance_ip)
     private_key_path="/app/keys/mewc-key"
     echo "Waiting for SSH at $instance_ip to be available..."
-    sleep 60
+    sleep 30
     while ! ssh -i $private_key_path -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PasswordAuthentication=no ubuntu@$instance_ip true; do
       echo "Still waiting for SSH at $instance_ip to be available..."
       sleep 30
     done
     ansible-playbook -i "$(terraform output instance_ip)," setup_volume.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
     ansible-playbook -i "$(terraform output instance_ip)," setup_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    ansible-playbook -i "$(terraform output instance_ip)," setup_sftp.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
   else
       echo "Terraform apply failed. Exiting."
       exit 1
