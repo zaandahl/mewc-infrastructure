@@ -21,4 +21,17 @@
         group: guestuser
         mode: '0755'
 
+    - name: Ensure password authentication is enabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+        state: present
+      notify: Restart sshd
+
+  handlers:
+    - name: Restart sshd
+      service:
+        name: ssh
+        state: restarted
 
