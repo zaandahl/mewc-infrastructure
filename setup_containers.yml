@@ -1,0 +1,21 @@
+---
+- hosts: all
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: /app/keys/mewc-key
+  become: yes
+  tasks:
+  - name: Notify user about the next task
+    debug:
+      msg: "Pulling the Docker images will take a while, go enjoy a coffee..."
+  - name: Pull required Docker images
+    docker_image:
+      name: "{{ item }}"
+      source: pull
+    loop:
+      - zaandahl/megadetector:latest
+      - zaandahl/mewc-snip:latest
+      - zaandahl/mewc-box:latest
+      - zaandahl/mewc-exif:latest
+      - zaandahl/en-predict:latest
+      # Add other images as needed
