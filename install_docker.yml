@@ -1,0 +1,42 @@
+---
+- hosts: all
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: /app/keys/mewc-key
+  become: yes
+  tasks:
+    - name: Ensure old docker versions are removed
+      apt:
+        name: 
+          - docker
+          - docker-engine
+          - docker.io
+        state: absent
+
+    - name: Install required system packages
+      apt:
+        name: 
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker APT repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
+        state: present
+
+    - name: Update the APT package cache
+      apt:
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present

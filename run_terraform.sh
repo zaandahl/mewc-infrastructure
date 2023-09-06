@@ -31,9 +31,11 @@ if [ "$1" == "apply" ]; then
       sleep 30
     done
     ansible-playbook -i "$(terraform output instance_ip)," setup_volume.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
-    ansible-playbook -i "$(terraform output instance_ip)," setup_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
     ansible-playbook -i "$(terraform output instance_ip)," setup_sftp.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
-    ansible-playbook -i "$(terraform output instance_ip)," setup_containers.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    ansible-playbook -i "$(terraform output instance_ip)," install_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    # ansible-playbook -i "$(terraform output instance_ip)," setup_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    # ansible-playbook -i "$(terraform output instance_ip)," setup_nvidiadocker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    # ansible-playbook -i "$(terraform output instance_ip)," setup_containers.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
   else
       echo "Terraform apply failed. Exiting."
       exit 1

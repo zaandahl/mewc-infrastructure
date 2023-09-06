@@ -1,0 +1,68 @@
+---
+- hosts: all
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: /app/keys/mewc-key
+  become: yes
+  tasks:
+  
+  - name: Update package repository
+    apt:
+      update_cache: yes
+
+  - name: Import NVIDIA GPG key
+    ansible.builtin.apt_key:
+      url: https://nvidia.github.io/libnvidia-container/gpgkey
+      state: present
+      keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+  - name: Add NVIDIA stable repository
+    ansible.builtin.apt_repository:
+      repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/ubuntu18.04/amd64 /"
+      state: present
+      filename: nvidia-container-toolkit
+      update_cache: yes
+
+  - name: Add NVIDIA stable deb repository
+    ansible.builtin.apt_repository:
+      repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /"
+      state: present
+      filename: nvidia-container-toolkit
+      update_cache: yes
+
+  - name: Install nvidia-container-toolkit package
+    apt:
+      name: nvidia-container-toolkit-base
+      state: present
+
+  - name: Generate CDI specification for NVIDIA devices
+    command:
+      cmd: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+      creates: /etc/cdi/nvidia.yaml  # This ensures the command runs only if the file doesn't exist.
+
+  - name: Configure Docker for NVIDIA runtime
+    block:
+      - name: Install the nvidia-container-toolkit
+        apt:
+          name: nvidia-container-toolkit
+          state: present
+
+      - name: Configure Docker daemon for NVIDIA runtime
+        command: nvidia-ctk runtime configure --runtime=docker
+        notify: Restart Docker
+
+  - name: Restart Docker service
+    service:
+      name: docker
+      state: restarted
+
+  - name: Test the NVIDIA setup with Docker
+    command:
+      cmd: docker run --rm --runtime=nvidia --gpus all nvidia/cuda:11.6.2-base-ubuntu20.04 nvidia-smi
+      warn: no
+
+  handlers:
+    - name: Restart Docker
+      systemd:
+        name: docker
+        state: restarted

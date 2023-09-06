@@ -37,7 +37,7 @@ resource "openstack_networking_secgroup_rule_v2" "secgroup_rule_ssh" {
 
 resource "openstack_blockstorage_volume_v3" "mewc_volume" {
   name = "mewc-volume"
-  size = 500  # Size in GB
+  size = 1000  # Size in GB
   description = "My Terraform-managed volume"
   availability_zone = "tasmania-02"
 }
@@ -45,8 +45,10 @@ resource "openstack_blockstorage_volume_v3" "mewc_volume" {
 # Create a web server
 resource "openstack_compute_instance_v2" "test-server" {
   name      = "mewc-cloud-test"
-  image_id  = "3fdc6cfa-f197-4dfd-a6b4-b0b9f7795b41" # Ubuntu 22.04 LTS with Docker
-  flavor_id = "d692a518-6939-465e-a4b9-58a388f468d3" # c3.small
+  image_id = "0dfdea2d-5f10-4117-8dd0-186b1bc99df2" # Ubuntu 22.04 LTS with with GPU
+  #image_id  = "3fdc6cfa-f197-4dfd-a6b4-b0b9f7795b41" # Ubuntu 22.04 LTS with Docker
+  #flavor_id = "d692a518-6939-465e-a4b9-58a388f468d3" # c3.small
+  flavor_id = "reservation:8e12a7b2-be9d-44b5-b15e-a3282e4a3e94" # g2.xlarge reservation
   key_pair  = "mewc-key"
   security_groups = [openstack_networking_secgroup_v2.secgroup.name]
   availability_zone = "tasmania-02"
@@ -60,7 +62,7 @@ resource "openstack_compute_volume_attach_v2" "va" {
 # Create a GPU server
 # resource "openstack_compute_instance_v2" "gpu-server" {
 #   name      = "mewc-cloud-gpu"
-#   image_id  = "0dfdea2d-5f10-4117-8dd0-186b1bc99df2" # Ubuntu 22.04 LTS (Jammy) amd64 with GPU
+#   image_id  = "3fdc6cfa-f197-4dfd-a6b4-b0b9f7795b41" # Ubuntu 22.04 LTS with Docker
 #   flavor_id = "d692a518-6939-465e-a4b9-58a388f468d3" # c3.small (need to update this after reservation)
 #   key_pair  = "mewc-key"
 #   security_groups = [openstack_networking_secgroup_v2.secgroup.name]
