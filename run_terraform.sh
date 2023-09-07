@@ -32,6 +32,7 @@ if [ "$1" == "apply" ]; then
     done
     ansible-playbook -i "$(terraform output instance_ip)," setup_volume.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
     ansible-playbook -i "$(terraform output instance_ip)," setup_sftp.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    ansible-playbook -i "$(terraform output instance_ip)," setup_powershell.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
     ansible-playbook -i "$(terraform output instance_ip)," install_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
     ansible-playbook -i "$(terraform output instance_ip)," setup_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
     ansible-playbook -i "$(terraform output instance_ip)," setup_nvidiadocker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
