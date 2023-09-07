@@ -29,6 +29,21 @@
         state: present
       notify: Restart sshd
 
+    - name: Ensure challenge response authentication is enabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^ChallengeResponseAuthentication'
+        line: 'ChallengeResponseAuthentication yes'
+        state: present
+      notify: Restart sshd
+
+    - name: Comment out Include directive
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^(Include \/etc\/ssh\/sshd_config\.d\/\*\.conf)'
+        replace: '#\1'
+      notify: Restart sshd
+
   handlers:
     - name: Restart sshd
       service:
