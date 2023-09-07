@@ -43,8 +43,8 @@ resource "openstack_blockstorage_volume_v3" "mewc_volume" {
 }
 
 # Create a web server
-resource "openstack_compute_instance_v2" "test-server" {
-  name      = "mewc-cloud-test"
+resource "openstack_compute_instance_v2" "gpu-server" {
+  name      = "mewc-cloud-gpu"
   image_id = "0dfdea2d-5f10-4117-8dd0-186b1bc99df2" # Ubuntu 22.04 LTS with with GPU
   #image_id  = "3fdc6cfa-f197-4dfd-a6b4-b0b9f7795b41" # Ubuntu 22.04 LTS with Docker
   #flavor_id = "d692a518-6939-465e-a4b9-58a388f468d3" # c3.small
@@ -55,7 +55,7 @@ resource "openstack_compute_instance_v2" "test-server" {
 }
 
 resource "openstack_compute_volume_attach_v2" "va" {
-  instance_id = openstack_compute_instance_v2.test-server.id
+  instance_id = openstack_compute_instance_v2.gpu-server.id
   volume_id   = openstack_blockstorage_volume_v3.mewc_volume.id
 }
 
@@ -70,5 +70,5 @@ resource "openstack_compute_volume_attach_v2" "va" {
 # }
 
 output "instance_ip" {
-  value = openstack_compute_instance_v2.test-server.access_ip_v4
+  value = openstack_compute_instance_v2.gpu-server.access_ip_v4
 }

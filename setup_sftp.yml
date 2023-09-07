@@ -5,10 +5,10 @@
     ansible_ssh_private_key_file: /app/keys/mewc-key
   become: yes
   tasks:
-    - name: Create guestuser
+    - name: Create barry
       user:
-        name: guestuser
-        password: "$6$lPEnzmq3MGP7a3ej$O8Znxqu.gvNFoeAMRa26YjgbD8nG.wunxXb6ggPs4IcFP1nVQ2tCh2vj3ES5Am8sup7heLSl8Uoo1OU7r7bww0"
+        name: barry
+        password: "$6$H6xJ/cGxiiFzhWFj$SP21sqmEBzVBjtYtJySO5EoBdt3uxnjkwftDJV8Leq1a/L3NI30wSLfghvmVp6s/aF5dcT7NxFbBjkIucXWh9/"
         shell: /bin/bash
         comment: "Guest User with regular shell"
         home: /mnt/mewc-volume/service
@@ -17,8 +17,8 @@
       file:
         path: /mnt/mewc-volume/service
         state: directory
-        owner: guestuser
-        group: guestuser
+        owner: barry
+        group: barry
         mode: '0755'
 
     - name: Ensure password authentication is enabled

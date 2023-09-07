@@ -10,9 +10,9 @@
         name: ubuntu
         groups: docker
         append: yes
-    - name: Add guestuser to docker group
+    - name: Add barry to docker group
       user:
-        name: guestuser
+        name: barry
         groups: docker
         append: yes
 
