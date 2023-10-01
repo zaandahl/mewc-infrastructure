@@ -1,0 +1,219 @@
+{
+  "version": 4,
+  "terraform_version": "0.15.3",
+  "serial": 447,
+  "lineage": "ef7e33ab-2b5f-7256-bd04-a85e384fd677",
+  "outputs": {
+    "instance_ip": {
+      "value": "131.217.179.199",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "data",
+      "type": "external",
+      "name": "fetch_gpu_reservation",
+      "provider": "provider[\"registry.terraform.io/hashicorp/external\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "id": "-",
+            "program": [
+              "bash",
+              "./fetch_flavor_id.sh"
+            ],
+            "query": null,
+            "result": {
+              "flavor_id": "f1e0fbc7-f9ff-47d4-975e-ca81e5cc45cd"
+            },
+            "working_dir": null
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "openstack_blockstorage_volume_v3",
+      "name": "mewc_volume",
+      "provider": "provider[\"registry.terraform.io/terraform-provider-openstack/openstack\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "attachment": [],
+            "availability_zone": "tasmania-02",
+            "consistency_group_id": null,
+            "description": "My Terraform-managed volume",
+            "enable_online_resize": null,
+            "id": "8fedbdd0-f52b-44b8-9efd-c72bcd157aee",
+            "image_id": null,
+            "metadata": {},
+            "multiattach": null,
+            "name": "vol_test",
+            "region": "Melbourne",
+            "scheduler_hints": [],
+            "size": 1000,
+            "snapshot_id": "",
+            "source_replica": null,
+            "source_vol_id": "",
+            "timeouts": null,
+            "volume_type": "standard"
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjo2MDAwMDAwMDAwMDAsImRlbGV0ZSI6NjAwMDAwMDAwMDAwfX0="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "openstack_compute_instance_v2",
+      "name": "gpu-server",
+      "provider": "provider[\"registry.terraform.io/terraform-provider-openstack/openstack\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "access_ip_v4": "131.217.179.199",
+            "access_ip_v6": "",
+            "admin_pass": null,
+            "all_metadata": {},
+            "all_tags": [],
+            "availability_zone": "tasmania-02",
+            "availability_zone_hints": null,
+            "block_device": [],
+            "config_drive": null,
+            "flavor_id": "f1e0fbc7-f9ff-47d4-975e-ca81e5cc45cd",
+            "flavor_name": "c3.small",
+            "floating_ip": null,
+            "force_delete": false,
+            "id": "8f8a24c4-44c0-42b2-a2e5-b2f9c4d88e46",
+            "image_id": "0dfdea2d-5f10-4117-8dd0-186b1bc99df2",
+            "image_name": "NeCTAR Ubuntu 22.04 LTS (Jammy) amd64 (NVIDIA vGPU) [v7]",
+            "key_pair": "mewc-key",
+            "metadata": null,
+            "name": "cpu_test",
+            "network": [
+              {
+                "access_network": false,
+                "fixed_ip_v4": "131.217.179.199",
+                "fixed_ip_v6": "",
+                "floating_ip": "",
+                "mac": "fa:16:3e:95:cc:d5",
+                "name": "tas-02",
+                "port": "",
+                "uuid": "00ad2ec0-343c-48ff-af3e-1f63bdf86e87"
+              }
+            ],
+            "network_mode": null,
+            "personality": [],
+            "power_state": "error",
+            "region": "Melbourne",
+            "scheduler_hints": [],
+            "security_groups": [
+              "gpu_terraform_secgroup"
+            ],
+            "stop_before_destroy": false,
+            "tags": [],
+            "timeouts": null,
+            "user_data": null,
+            "vendor_options": [],
+            "volume": []
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxODAwMDAwMDAwMDAwLCJkZWxldGUiOjE4MDAwMDAwMDAwMDAsInVwZGF0ZSI6MTgwMDAwMDAwMDAwMH19",
+          "dependencies": [
+            "data.external.fetch_gpu_reservation",
+            "openstack_networking_secgroup_v2.secgroup"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "openstack_compute_volume_attach_v2",
+      "name": "va",
+      "provider": "provider[\"registry.terraform.io/terraform-provider-openstack/openstack\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "device": "/dev/vdb",
+            "id": "8f8a24c4-44c0-42b2-a2e5-b2f9c4d88e46/8fedbdd0-f52b-44b8-9efd-c72bcd157aee",
+            "instance_id": "8f8a24c4-44c0-42b2-a2e5-b2f9c4d88e46",
+            "multiattach": null,
+            "region": "Melbourne",
+            "timeouts": null,
+            "vendor_options": [],
+            "volume_id": "8fedbdd0-f52b-44b8-9efd-c72bcd157aee"
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjo2MDAwMDAwMDAwMDAsImRlbGV0ZSI6NjAwMDAwMDAwMDAwfX0=",
+          "dependencies": [
+            "data.external.fetch_gpu_reservation",
+            "openstack_blockstorage_volume_v3.mewc_volume",
+            "openstack_compute_instance_v2.gpu-server",
+            "openstack_networking_secgroup_v2.secgroup"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "openstack_networking_secgroup_rule_v2",
+      "name": "secgroup_rule_ssh",
+      "provider": "provider[\"registry.terraform.io/terraform-provider-openstack/openstack\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "description": "",
+            "direction": "ingress",
+            "ethertype": "IPv4",
+            "id": "94f05c49-7d82-4324-932d-aeb59f22c47d",
+            "port_range_max": 22,
+            "port_range_min": 22,
+            "protocol": "tcp",
+            "region": "Melbourne",
+            "remote_group_id": "",
+            "remote_ip_prefix": "0.0.0.0/0",
+            "security_group_id": "45af2fd9-93ad-4aeb-b1bf-22e6f80a2079",
+            "tenant_id": "f840a7e5287e493db4b512049b1b97e2",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiZGVsZXRlIjo2MDAwMDAwMDAwMDB9fQ==",
+          "dependencies": [
+            "openstack_networking_secgroup_v2.secgroup"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "openstack_networking_secgroup_v2",
+      "name": "secgroup",
+      "provider": "provider[\"registry.terraform.io/terraform-provider-openstack/openstack\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "all_tags": [],
+            "delete_default_rules": null,
+            "description": "Security Group managed by Terraform",
+            "id": "45af2fd9-93ad-4aeb-b1bf-22e6f80a2079",
+            "name": "gpu_terraform_secgroup",
+            "region": "Melbourne",
+            "tags": [],
+            "tenant_id": "f840a7e5287e493db4b512049b1b97e2",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiZGVsZXRlIjo2MDAwMDAwMDAwMDB9fQ=="
+        }
+      ]
+    }
+  ]
+}

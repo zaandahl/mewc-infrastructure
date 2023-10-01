@@ -1,0 +1,50 @@
+---
+- hosts: all
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: /app/keys/mewc-key
+  become: yes
+  tasks:
+    - name: Create laura
+      user:
+        name: laura
+        password: "$6$Kld1193/dcDW68US$4clz3UZG.qeonDv/h/LJHf1aAUA.DhAeINpvgJ11hnqFuR83CXdUWz.rL1UHnUdUStc.43nB53SNJ48y07etI/"
+        shell: /bin/bash
+        comment: "Guest User with regular shell"
+        home: /home/laura
+
+    - name: Add laura to sudo group
+      user:
+        name: laura
+        groups: sudo
+        append: yes
+
+    - name: Ensure password authentication is enabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+        state: present
+      notify: Restart sshd
+
+    - name: Ensure challenge response authentication is enabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^ChallengeResponseAuthentication'
+        line: 'ChallengeResponseAuthentication yes'
+        state: present
+      notify: Restart sshd
+
+    - name: Comment out Include directive
+      ansible.builtin.replace:
+        path: /etc/ssh/sshd_config
+        regexp: '^(Include \/etc\/ssh\/sshd_config\.d\/\*\.conf)'
+        replace: '#\1'
+      notify: Restart sshd
+
+  handlers:
+    - name: Restart sshd
+      service:
+        name: ssh
+        state: restarted
+

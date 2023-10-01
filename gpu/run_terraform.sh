@@ -17,10 +17,33 @@ echo "TF_VAR_domain_name is set to '$TF_VAR_domain_name'"
 # Initialize Terraform
 terraform init
 
+list_resources() {
+  terraform state list
+}
+
+destroy_resource() {
+  instance_name="$1"
+  volume_name="$2"
+  
+  # Detach the volume from the instance
+  terraform destroy -target="openstack_compute_volume_attach_v2.va" -var="instance_name=${instance_name}" -var="volume_name=${volume_name}" -auto-approve
+  # Destroy the instance
+  terraform destroy -target="openstack_compute_instance_v2.gpu-server" -var="instance_name=${instance_name}" -var="volume_name=${volume_name}" -auto-approve
+  # Destroy the volume
+  terraform destroy -target="openstack_blockstorage_volume_v3.mewc_volume" -var="instance_name=${instance_name}" -var="volume_name=${volume_name}" -auto-approve
+}
+
+destroy_secgroup() {
+  # Destroy the SSH security group rule
+  terraform destroy -target="openstack_networking_secgroup_rule_v2.secgroup_rule_ssh" -auto-approve
+  # Destroy the security group
+  terraform destroy -target="openstack_networking_secgroup_v2.secgroup" -auto-approve
+}
+
 # Check the first command-line argument
 if [ "$1" == "apply" ]; then
   # Apply Terraform changes
-  terraform apply -auto-approve
+  terraform apply -var="instance_name=$2" -var="volume_name=$3" -var="instance_flavor=$4" -auto-approve
   if [ $? -eq 0 ]; then
     instance_ip=$(terraform output -raw instance_ip)
     private_key_path="/app/keys/mewc-key"
@@ -41,10 +64,17 @@ if [ "$1" == "apply" ]; then
       echo "Terraform apply failed. Exiting."
       exit 1
   fi
-
+elif [ "$1" == "list" ]; then
+  list_resources
 elif [ "$1" == "destroy" ]; then
   # Destroy Terraform resources
-  terraform destroy -auto-approve
+  #terraform destroy -auto-approve
+  destroy_resource $2 $3
+elif [ "$1" == "destroy_secgroup" ]; then
+  destroy_secgroup
 else
-  echo "Usage: $0 {apply|destroy}"
+  # echo a message describing usage with options apply list and destroy and the required arguments
+  echo "Usage: $0 apply [instance_name] [volume_name] ['gpu' or 'small']"
+  echo "Usage: $0 destroy [instance_name] [volume_name]"
+  echo "Usage: $0 [list|destroy_secgroup]"
 fi

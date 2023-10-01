@@ -15,8 +15,8 @@ RUN curl -O https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraf
     unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip -d /usr/local/bin/ && \
     rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip
 
-# Install Ansible
-RUN pip install ansible==${ANSIBLE_VERSION}
+# Install Ansible and Vault
+RUN pip install ansible==${ANSIBLE_VERSION} ansible-lint ansible-vault
 
 # Install OpenStack clients
 RUN pip install python-openstackclient python-glanceclient python-ironicclient python-manilaclient python-novaclient python-neutronclient python-swiftclient
