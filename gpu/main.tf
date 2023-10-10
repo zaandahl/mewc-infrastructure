@@ -1,6 +1,6 @@
 # Define required providers
 terraform {
-required_version = ">= 0.14.0"
+  required_version = ">= 0.14.0"
   required_providers {
     openstack = {
       source  = "terraform-provider-openstack/openstack"
@@ -23,16 +23,6 @@ data "external" "fetch_gpu_reservation" {
   program = ["bash", "${path.module}/fetch_flavor_id.sh"]
 }
 
-# Define a local value for final flavor decision
-locals {
-  # Define default values
-  small_flavor_id = "d692a518-6939-465e-a4b9-58a388f468d3"  # c3.small
-  gpu_flavor_id   = data.external.fetch_gpu_reservation.result.flavor_id
-
-  # Determine the flavor based on the variable and available GPU reservation
-  final_flavor_id = var.instance_flavor == "gpu" ? (local.gpu_flavor_id != "" ? local.gpu_flavor_id : local.small_flavor_id) : local.small_flavor_id
-}
-
 # Define the security group
 resource "openstack_networking_secgroup_v2" "secgroup" {
   name        = "gpu_terraform_secgroup"
@@ -50,28 +40,28 @@ resource "openstack_networking_secgroup_rule_v2" "secgroup_rule_ssh" {
   security_group_id = openstack_networking_secgroup_v2.secgroup.id
 }
 
-resource "openstack_blockstorage_volume_v3" "mewc_volume" {
-  name = var.volume_name
-  size = 1000  # Size in GB
-  description = "My Terraform-managed volume"
+resource "openstack_blockstorage_volume_v3" "mewc_cloud_volume" {
+  name             = "mewc_cloud_volume"
+  size             = 1000  # Size in GB
+  description      = "My Terraform-managed volume"
   availability_zone = "tasmania-02"
 }
 
-# Create a web server
-resource "openstack_compute_instance_v2" "gpu-server" {
-  name      = var.instance_name
-  image_id = "0dfdea2d-5f10-4117-8dd0-186b1bc99df2" # Ubuntu 22.04 LTS with with GPU
-  flavor_id = local.final_flavor_id
-  key_pair  = "mewc-key"
-  security_groups = [openstack_networking_secgroup_v2.secgroup.name]
+# Create a GPU server
+resource "openstack_compute_instance_v2" "mewc_cloud_gpu" {
+  name             = "mewc_cloud_gpu"
+  image_id         = "0dfdea2d-5f10-4117-8dd0-186b1bc99df2" # Ubuntu 22.04 LTS with GPU
+  flavor_id        = data.external.fetch_gpu_reservation.result.flavor_id
+  key_pair         = "mewc-key"
+  security_groups  = [openstack_networking_secgroup_v2.secgroup.name]
   availability_zone = "tasmania-02"
 }
 
-resource "openstack_compute_volume_attach_v2" "va" {
-  instance_id = openstack_compute_instance_v2.gpu-server.id
-  volume_id   = openstack_blockstorage_volume_v3.mewc_volume.id
+resource "openstack_compute_volume_attach_v2" "volume_attachment" {
+  instance_id = openstack_compute_instance_v2.mewc_cloud_gpu.id
+  volume_id   = openstack_blockstorage_volume_v3.mewc_cloud_volume.id
 }
 
 output "instance_ip" {
-  value = openstack_compute_instance_v2.gpu-server.access_ip_v4
+  value = openstack_compute_instance_v2.mewc_cloud_gpu.access_ip_v4
 }
