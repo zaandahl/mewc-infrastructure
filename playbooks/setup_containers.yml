@@ -17,5 +17,6 @@
       - zaandahl/mewc-snip:latest
       - zaandahl/mewc-box:latest
       - zaandahl/mewc-exif:latest
-      - zaandahl/en-predict:latest
+      - zaandahl/mewc-predict:latest
+      - zaandahl/mewc-train:latest
       # Add other images as needed
