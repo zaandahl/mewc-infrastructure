@@ -13,7 +13,7 @@
       name: "{{ item }}"
       source: pull
     loop:
-      - zaandahl/megadetector:latest
+      - zaandahl/mewc-detector:latest
       - zaandahl/mewc-snip:latest
       - zaandahl/mewc-box:latest
       - zaandahl/mewc-exif:latest
