@@ -1,3 +1,5 @@
+<img src="mewc_logo_hex.png" alt="MEWC Hex Sticker" width="200" align="right"/>
+
 # mewc-infrastructure
 Docker container with Terraform and OpenStack for setting up Nectar Cloud infrastructure
 
