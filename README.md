@@ -114,21 +114,12 @@ Replace the placeholders with your actual OpenStack credentials.
 ### Reserving a GPU Instance on ARDC Nectar
 To reserve a GPU instance, you will need to follow these steps:
 
-1. Access the Nectar Dashboard:
+- Log on to the [Nectar Dashboard](https://dashboard.rc.nectar.org.au) and ensure you're working in the right project (Use the project selector on the top left-hand side).
 
-- Log in to the Nectar Dashboard using your credentials.
-
-2. Navigate to Project:
-
-- Ensure you're in the correct project by checking the project selector on the top left-hand side of the dashboard.
-
-3. Request GPU Service:
-
-- Under the Compute section, navigate to the Flavors area to see the available instance types. Look for flavors that include GPUs. These are typically labeled as 'gpu' in the name.
-
-4. Allocate Resources:
+- Request GPU Service by navigating under the Compute section to the Flavors area to see the available instance types. Look for flavors that include GPUs. These are typically labeled as 'gpu' in the name.
 
 - If GPU flavors are available, you can proceed to launch an instance with the desired GPU flavor.
+
 - If GPU flavors are not listed, you may need to request access to GPU services. This can typically be done by submitting a support ticket through the Nectar Dashboard requesting the allocation of GPU resources.
 
 **Note:** GPU resources are in high demand and may not always be immediately available. If necessary, plan your reservations in advance and consider timeframes when GPUs are more likely to be available.
