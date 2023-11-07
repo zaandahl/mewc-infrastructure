@@ -16,7 +16,7 @@ cd mewc-infrastructure
 
 
 2. **Set Up the Nectar Environment File**
-Before using the Docker container, you must configure your Nectar credentials. Copy the provided `nectar.env.example` file to `nectar.env`, and fill in your details. You can find more information on how to get your Nectar credentials in the section below titled "Setting up OpenStack Credentials".
+Before using the Docker container, you must configure your Nectar credentials. Copy the provided `nectar.env.example` file to `nectar.env`, and fill in your details. You can find more information on how to get your Nectar credentials in the section [Setting up OpenStack Credentials](https://github.com/zaandahl/mewc-infrastructure/blob/main/README.md#setting-up-openstack-credentials).
 
 ```
 cp nectar.env.example nectar.env
@@ -130,17 +130,6 @@ To reserve a GPU instance, you will need to follow these steps:
 
 - If GPU flavors are available, you can proceed to launch an instance with the desired GPU flavor.
 - If GPU flavors are not listed, you may need to request access to GPU services. This can typically be done by submitting a support ticket through the Nectar Dashboard requesting the allocation of GPU resources.
-
-5. Launch an Instance:
-
-- Go to the Instances section and click on Launch Instance.
-- Follow the instance creation wizard, making sure to select the GPU flavor you have access to.
-- Complete the form by configuring instance details, such as the image, flavor, key pair, and security groups.
-
-6. Reservation Confirmation:
-
-- After you've launched the instance, it may take a few moments for the instance to become active.
-- Once active, you'll see the instance listed in your project's Instances section.
 
 **Note:** GPU resources are in high demand and may not always be immediately available. If necessary, plan your reservations in advance and consider timeframes when GPUs are more likely to be available.
 
