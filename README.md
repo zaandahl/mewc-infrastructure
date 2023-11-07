@@ -1,66 +1,79 @@
 <img src="mewc_logo_hex.png" alt="MEWC Hex Sticker" width="200" align="right"/>
 
 # mewc-infrastructure
-Docker container with Terraform and OpenStack for setting up Nectar Cloud infrastructure
+
+This repository guides ecologists through setting up a GPU instance in ARDC Nectar Cloud using Terraform within a Docker container. This is an example of "infrastructure as code" or IAC. 
+
+## Quick Start
+
+1. **Clone the Repository**
+Clone this repository to get started. This will include all necessary Terraform files and scripts.
+
+```
+git clone https://github.com/your-repository/mewc-infrastructure.git
+cd mewc-infrastructure
+```
 
 
-## Building and Launching the Docker Container
+2. **Set Up the Nectar Environment File**
+Before using the Docker container, you must configure your Nectar credentials. Copy the provided `nectar.env.example` file to `nectar.env`, and fill in your details. You can find more information on how to get your Nectar credentials in the section below titled "Setting up OpenStack Credentials".
 
-1. Build the Docker image by running the following command in the terminal:
+```
+cp nectar.env.example nectar.env
+```
+
+
+
+3. **Build and Launch Docker Container**
+Build the Docker image and start the container using `docker-compose`. This will create an isolated environment with all the tools you need. The last command will start a Docker bash shell from which you will perform all subsequent steps.
+
 ```
 docker-compose build
-```
-
-2. Start the container with the following command:
-```
 docker-compose up -d
-```
-
-3. You can then access the container's shell with:
-```
 docker-compose exec mewc_infra_setup bash
 ```
 
-## Generating OpenStack Key Pair
 
-We have included a script to help you generate a new key pair:
+4. **Set Up a Key Pair**
+Run the provided script within the Docker bash shell to generate and register a key pair with OpenStack. This key pair will be used to securely access your instances. This command will create a key pair located in the local repository you cloned under `./mewc-infrastructure/keys`. You will need to reference this key location to connect to GPU instances you create.
 
-1. Run the `create_keypair.sh` script inside the Docker container:
 ```
 ./create_keypair.sh
 ```
 
-2. This will create a new key pair and register it with OpenStack. The private key will be saved in the `keys/` directory.
+5. **Reserve a GPU Instance on ARDC Nectar**
 
-## Listing Available Images and Flavors in OpenStack
+Follow the steps in the Reserving a GPU Instance on ARDC Nectar section to ensure your analysis can leverage the power of GPU computing.
 
-You can list available images and flavors using the OpenStack CLI:
+6. **Run Terraform Commands to Create the GPU Instance**
+Navigate to the `gpu` folder and initialize Terraform:
 
-- To list images, use the following command:
 ```
-openstack image list
-```
-
-- To list flavors, use:
-```
-openstack flavor list
+cd gpu
+terraform init
+terraform apply
 ```
 
-## Configuring and Running Terraform
 
-1. Modify `main.tf` to use the appropriate `image_id` and `flavor_id` based on your needs. You can use the `openstack image list` and `openstack flavor list` commands to find the IDs of available images and flavors.
+7. **Connect to the GPU Instance**
+Once your instance is running, connect to it with SSH using the provided key pair. For file transfers, use an SFTP client like Cyberduck. Note that this step will typically not be performed within the Docker bash environment. You will need to reference the mewc-key.pem file generated in step 4 with your terminal or SFTP client. 
 
-2. Run the `run_terraform.sh` script to create resources:
 ```
-./run_terraform.sh apply
-```
-
-3. After verifying that the resources were created successfully, you can destroy them with:
-```
-./run_terraform.sh destroy
+ssh -i path/to/mewc-key.pem ubuntu@<your-instance-ip-address>
 ```
 
-## Environment Variables and Their Usage
+
+8. **Teardown the GPU Instance**
+When your work is complete, use Terraform's destroy command to tear down your resources and avoid incurring unnecessary charges. Use the following command in the Docker bash shell:
+
+```
+terraform destroy
+```
+
+
+## Detailed Information
+
+### Setting Up OpenStack Credentials
 
 We use environment variables to store OpenStack credentials and pass them to the Docker container. These environment variables are set in the `nectar.env` file, which is loaded when the Docker container is started.
 
@@ -72,22 +85,17 @@ We use environment variables to store OpenStack credentials and pass them to the
 
 - They are used by the OpenStack CLI to authenticate with the OpenStack API, and by Terraform to authenticate with the OpenStack provider.
 
-Remember, always keep your `nectar.env` file secure and do not share it with anyone. Also, always remember to add any new files containing sensitive information to your `.gitignore` file.
-
-
-## Setting Up OpenStack Credentials
-
 Before you can use the OpenStack client with Terraform, you'll need to set up your OpenStack credentials. These credentials are different from the login you use for the Nectar Dashboard.
 
 Follow these steps to setup your OpenStack credentials:
 
-1. Log on to the [Nectar Dashboard](https://dashboard.rc.nectar.org.au) and ensure you're working in the right project (Use the project selector on the top left-hand side).
+- Log on to the [Nectar Dashboard](https://dashboard.rc.nectar.org.au) and ensure you're working in the right project (Use the project selector on the top left-hand side).
 
-2. Click your email address from the top right corner and click `OpenStack RC File` to download the authentication file.
+- Click your email address from the top right corner and click `OpenStack RC File` to download the authentication file.
 
-3. Save the authentication file to your computer. This file contains all the settings required for authentication, except for your password.
+- Save the authentication file to your computer. This file contains all the settings required for authentication, except for your password.
 
-4. Click `Settings` in the same drop-down menu to get to the `Settings` page. Then click `Reset Password` to generate a new OpenStack password. This password is used only when working with the CLIs and APIs. This password does not replace the password you use to log into the Dashboard.
+- Click `Settings` in the same drop-down menu to get to the `Settings` page. Then click `Reset Password` to generate a new OpenStack password. This password is used only when working with the CLIs and APIs. This password does not replace the password you use to log into the Dashboard.
 
 You can read more about these steps in the [Nectar Tutorial on OpenStack Credentials](https://tutorials.rc.nectar.org.au/openstack-cli/04-credentials).
 
@@ -102,66 +110,60 @@ OS_PASSWORD=your-password
 
 Replace the placeholders with your actual OpenStack credentials. 
 
-**Important:** The `nectar.env` file contains sensitive information and should not be included in the git repository. Be sure to add it to your `.gitignore` file to prevent accidentally pushing it:
 
-```git
-echo "nectar.env" >> .gitignore
+### Reserving a GPU Instance on ARDC Nectar
+To reserve a GPU instance, you will need to follow these steps:
+
+1. Access the Nectar Dashboard:
+
+- Log in to the Nectar Dashboard using your credentials.
+
+2. Navigate to Project:
+
+- Ensure you're in the correct project by checking the project selector on the top left-hand side of the dashboard.
+
+3. Request GPU Service:
+
+- Under the Compute section, navigate to the Flavors area to see the available instance types. Look for flavors that include GPUs. These are typically labeled as 'gpu' in the name.
+
+4. Allocate Resources:
+
+- If GPU flavors are available, you can proceed to launch an instance with the desired GPU flavor.
+- If GPU flavors are not listed, you may need to request access to GPU services. This can typically be done by submitting a support ticket through the Nectar Dashboard requesting the allocation of GPU resources.
+
+5. Launch an Instance:
+
+- Go to the Instances section and click on Launch Instance.
+- Follow the instance creation wizard, making sure to select the GPU flavor you have access to.
+- Complete the form by configuring instance details, such as the image, flavor, key pair, and security groups.
+
+6. Reservation Confirmation:
+
+- After you've launched the instance, it may take a few moments for the instance to become active.
+- Once active, you'll see the instance listed in your project's Instances section.
+
+**Note:** GPU resources are in high demand and may not always be immediately available. If necessary, plan your reservations in advance and consider timeframes when GPUs are more likely to be available.
+
+
+
+### Additional Terraform Configurations
+
+- For setting up complex GPU instances, see the `gpu-multipleuser` folder.
+- For RStudio server instances, check the `cpu-rstudio` folder.
+
+
+### Listing Available Images and Flavors in OpenStack
+
+You can list available images and flavors using the OpenStack CLI:
+
+- To list images, use the following command:
+```
+openstack image list
 ```
 
-This project's `compose.yaml` file is configured to load the environment variables from `nectar.env` when starting the Docker container.
-
-## Connecting to Your Instance
-
-Once your instance is up and running, you can connect to it using SSH. Terraform has created an instance using a key pair for SSH access.
-
-### SSH Access
-
-To connect to your instance via SSH, use the `ssh` command followed by the username (for Ubuntu instances, this is usually `ubuntu`) and the IP address of the instance:
-
-```bash
-ssh ubuntu@<your-instance-ip-address>
+- To list flavors, use:
+```
+openstack flavor list
 ```
 
-Make sure to replace `<your-instance-ip-address>` with the actual IP address of your instance.
 
-If you get a permissions error, your private key file (`mewc-key.pem`) may not be properly secured. Ensure that it has the correct permissions by running:
-
-```bash
-chmod 600 mewc-key.pem
-```
-
-You also need to specify the path to your private key file using the `-i` option:
-
-```bash
-ssh -i path/to/mewc-key.pem ubuntu@<your-instance-ip-address>
-```
-
-Replace `path/to/mewc-key.pem` with the actual path to your private key file.
-
-### Managing Your SSH Keys
-
-The private key (`mewc-key.pem`) should be kept secure - treat it like a password. If someone else gains access to this file, they could access your instances.
-
-Also, remember to add the public key (`mewc-key.pem.pub`) to any new instances you create if you want to be able to connect to them with the associated private key.
-
-## Access volume and object storage using CyberDuck
-Download the CyberDuck client from https://cyberduck.io/download/
-
-To upload to volumne storage you just need to connect to the instance. You can find the IP address of the instance in the Nectar dashboard.
-Use SFTP to connect with a username of ubuntu and the private key you generated before.
-
-For object storage (S3) follow instructions on the Nectar page https://tutorials.rc.nectar.org.au/object-storage/04-object-storage-cyberduck
-
-They key point is to download the Nectar CyberDuck profile and enter your OpenStack credentials that you created before in your nectar.env file.
-
-Your credentials will look something like this: projectname:Default:your.username@domain.com
-Project name is from OS_PROJECT_NAME, Default is from OS_USER_DOMAIN_NAME
-You enter your OS_PASSWORD as the password.
-
-## Creating a sftp user with access to a specific directory
-
-You can use mkpasswd to create a password for the user:
-
-```bash
-mkpasswd -m sha-512
-```
