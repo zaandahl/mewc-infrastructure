@@ -5,17 +5,17 @@
     ansible_ssh_private_key_file: /app/keys/mewc-key
   become: yes
   tasks:
-    - name: Create laura
+    - name: Create guest researcher with power user privileges
       user:
-        name: laura
+        name: researcher
         password: "$6$Kld1193/dcDW68US$4clz3UZG.qeonDv/h/LJHf1aAUA.DhAeINpvgJ11hnqFuR83CXdUWz.rL1UHnUdUStc.43nB53SNJ48y07etI/"
         shell: /bin/bash
-        comment: "Guest User with regular shell"
-        home: /home/laura
+        comment: "Guest researcher with regular shell"
+        home: /home/researcher
 
-    - name: Add laura to sudo group
+    - name: Add guest to sudo group
       user:
-        name: laura
+        name: researcher
         groups: sudo
         append: yes
 
