@@ -50,7 +50,7 @@ resource "openstack_networking_secgroup_rule_v2" "secgroup_rule_shiny" {
 resource "openstack_compute_instance_v2" "cpu-server" {
   name      = "cloud-cpu"
   image_id  = "3fdc6cfa-f197-4dfd-a6b4-b0b9f7795b41" # Ubuntu 22.04 LTS with Docker
-  flavor_id = "d64c82e2-9a19-41d1-a4fc-c555fda25921" # c3.medium
+  flavor_id = "58bc4946-5782-4bd0-b8f6-c0830e29a621" # c3.xxlarge 32 cpu
   key_pair  = "mewc-key"
   security_groups = [openstack_networking_secgroup_v2.secgroup.name]
   availability_zone = "tasmania-02"
