@@ -2,74 +2,57 @@
 
 # mewc-infrastructure
 
-This repository guides ecologists through setting up a GPU instance in ARDC Nectar Cloud using Terraform within a Docker container. This is an example of "infrastructure as code" or IAC. 
+This repository guides ecologists through setting up a GPU instance in ARDC Nectar Cloud using Terraform within a Docker container, an example of "infrastructure as code" (IAC).
 
 ## Quick Start
 
-1. **Clone the Repository**
-Clone this repository to get started. This will include all necessary Terraform files and scripts.
-
-```
-git clone https://github.com/your-repository/mewc-infrastructure.git
+### 1. **Clone the Repository**
+```bash
+git clone https://github.com/zaandahl/mewc-infrastructure.git
 cd mewc-infrastructure
 ```
 
-
-2. **Set Up the Nectar Environment File**
+### 2. **Set Up the Nectar Environment File**
 Before using the Docker container, you must configure your Nectar credentials. Copy the provided `nectar.env.example` file to `nectar.env`, and fill in your details. You can find more information on how to get your Nectar credentials in the section [Setting up OpenStack Credentials](https://github.com/zaandahl/mewc-infrastructure/blob/main/README.md#setting-up-openstack-credentials).
 
 ```
 cp nectar.env.example nectar.env
 ```
 
-
-
-3. **Build and Launch Docker Container**
-Build the Docker image and start the container using `docker-compose`. This will create an isolated environment with all the tools you need. The last command will start a Docker bash shell from which you will perform all subsequent steps.
-
-```
+### 3. **Build and Launch Docker Container**
+```bash
 docker-compose build
 docker-compose up -d
 docker-compose exec mewc_infra_setup bash
 ```
 
-
-4. **Set Up a Key Pair**
+### 4. **Set Up a Key Pair**
 Run the provided script within the Docker bash shell to generate and register a key pair with OpenStack. This key pair will be used to securely access your instances. This command will create a key pair located in the local repository you cloned under `./mewc-infrastructure/keys`. You will need to reference this key location to connect to GPU instances you create.
 
 ```
 ./create_keypair.sh
 ```
 
-5. **Reserve a GPU Instance on ARDC Nectar**
+### 5. **Reserve a GPU Instance on ARDC Nectar**
+Follow the steps in the [Reserving a GPU Instance on ARDC Nectar](https://github.com/zaandahl/mewc-infrastructure/blob/main/README.md#reserving-a-gpu-instance-on-ardc-nectar) section to ensure your analysis can leverage the power of GPU computing.
 
-Follow the steps in the Reserving a GPU Instance on ARDC Nectar section to ensure your analysis can leverage the power of GPU computing.
-
-6. **Run Terraform Commands to Create the GPU Instance**
-Navigate to the `gpu` folder and initialize Terraform:
-
-```
+### 6. **Run Terraform to Create the GPU Instance using `run_terraform.sh`**
+Instead of running Terraform commands manually, use the `run_terraform.sh` script to automate the process. This script initializes and applies Terraform configurations and uses Ansible to set up the GPU machine for use with MEWC.
+```bash
 cd gpu
-terraform init
-terraform apply
+./run_terraform.sh apply
 ```
 
-
-7. **Connect to the GPU Instance**
-Once your instance is running, connect to it with SSH using the provided key pair. For file transfers, use an SFTP client like Cyberduck. Note that this step will typically not be performed within the Docker bash environment. You will need to reference the mewc-key.pem file generated in step 4 with your terminal or SFTP client. 
-
-```
+### 7. **Connect to the GPU Instance**
+```bash
 ssh -i path/to/mewc-key.pem ubuntu@<your-instance-ip-address>
 ```
 
-
-8. **Teardown the GPU Instance**
-When your work is complete, use Terraform's destroy command to tear down your resources and avoid incurring unnecessary charges. Use the following command in the Docker bash shell:
-
+### 8. **Teardown the GPU Instance using `run_terraform.sh`**
+To dismantle your resources, use the `run_terraform.sh` script with the `destroy` command.
+```bash
+./run_terraform.sh destroy
 ```
-terraform destroy
-```
-
 
 ## Detailed Information
 
