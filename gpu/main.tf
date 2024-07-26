@@ -50,7 +50,7 @@ resource "openstack_blockstorage_volume_v3" "mewc_cloud_volume" {
 # Create a GPU server
 resource "openstack_compute_instance_v2" "mewc_cloud_gpu" {
   name             = "mewc_cloud_gpu"
-  image_id         = "0dfdea2d-5f10-4117-8dd0-186b1bc99df2" # Ubuntu 22.04 LTS with GPU
+  image_id         = "e6b8ecab-e64f-440a-ac5d-6f89b89c81e9" # Ubuntu 22.04 LTS with GPU
   flavor_id        = data.external.fetch_gpu_reservation.result.flavor_id
   key_pair         = "mewc-key"
   security_groups  = [openstack_networking_secgroup_v2.secgroup.name]
