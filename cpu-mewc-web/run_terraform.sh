@@ -34,10 +34,10 @@ if [ "$1" == "apply" ]; then
     ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/setup_volume.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
 #    ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/setup_powershell.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
 #    ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/install_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
-#    ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/setup_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/setup_docker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
 #    ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/setup_nvidiadocker.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
 #    ansible-playbook -i "$(terraform output instance_ip)," ../playbooks/setup_containers.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
-    ansible-playbook -i "$(terraform output instance_ip)," web_stub.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+    ansible-playbook -i "$(terraform output instance_ip)," web_site.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
   else
       echo "Terraform apply failed. Exiting."
       exit 1

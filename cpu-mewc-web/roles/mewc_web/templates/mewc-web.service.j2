@@ -1,0 +1,16 @@
+[Unit]
+Description=MEWC Upload POC (FastAPI)
+After=network.target
+
+[Service]
+User={{ service_user }}
+Group={{ service_user }}
+Environment="MEWC_MOUNT={{ mount_point }}"
+Environment="MEWC_MAX_UPLOAD_MB={{ max_upload_mb }}"
+Environment="MEWC_ALLOWED_EXTS={{ allowed_exts | join(',') }}"
+WorkingDirectory={{ app_root }}
+ExecStart={{ venv_dir }}/bin/uvicorn app.main:app --host {{ bind_host }} --port {{ bind_port }} --proxy-headers --forwarded-allow-ips='*'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

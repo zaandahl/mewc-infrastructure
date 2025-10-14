@@ -1,0 +1,109 @@
+---
+- name: Ensure packages
+  apt:
+    name:
+      - python3-venv
+      - unzip
+      - nginx
+    state: present
+    update_cache: yes
+
+- name: Ensure app directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0755"
+  loop:
+    - "{{ app_root }}"
+    - "{{ app_root }}/app"
+    - "{{ app_root }}/app/templates"
+    - "{{ app_root }}/app/static"
+
+- name: Create venv
+  command: "python3 -m venv {{ venv_dir }}"
+  args: { creates: "{{ venv_dir }}/bin/activate" }
+
+- name: Sync app files
+  copy:
+    src: files/app/
+    dest: "{{ app_root }}/"
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0644"
+  notify: restart mewc-web
+
+- name: Make scripts executable
+  file:
+    path: "{{ item }}"
+    mode: "0755"
+  loop:
+    - "{{ app_root }}/bin/run_detect.sh"
+
+- name: Install Python deps (from venv, after files are in place)
+  ansible.builtin.pip:
+    requirements: "{{ app_root }}/requirements.txt"
+    virtualenv: "{{ venv_dir }}"
+    virtualenv_command: "python3 -m venv"
+  notify: restart mewc-web
+
+- name: Drop systemd unit
+  template:
+    src: templates/mewc-web.service.j2
+    dest: /etc/systemd/system/mewc-web.service
+    mode: "0644"
+  notify: restart mewc-web
+
+- name: Drop job unit template
+  template:
+    src: templates/mewc-job@.service.j2
+    dest: /etc/systemd/system/mewc-job@.service
+    mode: "0644"
+
+- name: Allow ubuntu to manage job units (sudoers)
+  copy:
+    src: files/mewc-web.sudoers
+    dest: /etc/sudoers.d/mewc-web
+    mode: "0440"
+    owner: root
+    group: root
+
+- name: Ensure ubuntu is in docker group (no repo changes)
+  user:
+    name: "{{ service_user }}"
+    groups: docker
+    append: true
+
+- name: Pre-pull detector image (if specified)
+  command: "docker pull {{ detect_image }}"
+  when: detect_image | length > 0
+
+- name: Nginx site
+  template:
+    src: templates/nginx_mewc_web.conf.j2
+    dest: /etc/nginx/sites-available/mewc-web
+    mode: "0644"
+  notify: restart nginx
+
+- name: Enable site
+  file:
+    src: /etc/nginx/sites-available/mewc-web
+    dest: /etc/nginx/sites-enabled/mewc-web
+    state: link
+    force: true
+  notify: restart nginx
+
+- name: Disable default site
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: restart nginx
+
+- name: Ensure jobs dir on mounted volume
+  file:
+    path: "{{ mount_point }}/jobs"
+    state: directory
+    owner: "{{ service_user }}"
+    group: "{{ service_user }}"
+    mode: "0775"

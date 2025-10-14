@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Upload images</h2>
+  <form action="/jobs" method="post" enctype="multipart/form-data">
+    <p><strong>Option A:</strong> Select a folder<br>
+      <input type="file" name="files" webkitdirectory multiple accept="image/*">
+    </p>
+    <p><strong>Option B:</strong> Upload a ZIP<br>
+      <input type="file" name="zipfile_upload" accept=".zip">
+    </p>
+    <p class="hint">Allowed: jpg, jpeg, png. Max {{ max_mb }} MB per request.</p>
+    <button type="submit">Go</button>
+  </form>
+</div>
+{% endblock %}

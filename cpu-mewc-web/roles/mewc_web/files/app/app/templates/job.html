@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Job {{ job_id }}</h2>
+  <p>Uploaded files: <strong>{{ count }}</strong></p>
+
+  <div id="actions">
+    <button id="startBtn">Process with MegaDetector</button>
+  </div>
+
+  <div id="status" class="card" style="margin-top:12px">
+    <div><strong>Status:</strong> <span id="st">idle</span></div>
+    <div><strong>Progress:</strong> <span id="pg">0 / {{ count }}</span></div>
+    <pre id="log" style="max-height:220px;overflow:auto;margin-top:8px;background:#0b0c10;padding:8px;border-radius:8px"></pre>
+    <div id="links" style="margin-top:8px;display:none">
+      <a href="/jobs/{{ job_id }}/download/md.json">Download md.json</a> ·
+      <a href="/jobs/{{ job_id }}/download/detections.csv">Download detections.csv</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const jobId = "{{ job_id }}";
+const st = document.getElementById('st');
+const pg = document.getElementById('pg');
+const lg = document.getElementById('log');
+const lk = document.getElementById('links');
+const btn = document.getElementById('startBtn');
+
+async function poll() {
+  const r = await fetch(`/jobs/${jobId}/status`);
+  if (!r.ok) return;
+  const s = await r.json();
+  st.textContent = s.status || 'unknown';
+  if (typeof s.processed === 'number' && typeof s.total === 'number') {
+    pg.textContent = `${s.processed} / ${s.total}`;
+  }
+  lg.textContent = s.log_tail || '';
+  if (s.status === 'done') lk.style.display = 'block';
+  setTimeout(poll, 2000);
+}
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  const r = await fetch(`/jobs/${jobId}/start`, {method:'POST'});
+  if (!r.ok) { btn.disabled = false; return; }
+  poll();
+});
+
+{% if state.status %}
+  st.textContent = "{{ state.status }}";
+  pg.textContent = "{{ state.processed|default(0) }} / {{ state.total|default(count) }}";
+  {% if has_md and has_csv %} lk.style.display = 'block'; {% endif %}
+  poll();
+{% endif %}
+</script>
+{% endblock %}
+

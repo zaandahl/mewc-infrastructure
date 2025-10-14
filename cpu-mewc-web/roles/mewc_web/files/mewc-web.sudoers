@@ -1,0 +1,1 @@
+ubuntu ALL=(root) NOPASSWD: /bin/systemctl start mewc-job@*, /bin/systemctl stop mewc-job@*, /bin/systemctl status mewc-job@*

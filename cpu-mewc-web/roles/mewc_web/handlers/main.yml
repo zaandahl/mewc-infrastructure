@@ -1,0 +1,10 @@
+---
+- name: restart nginx
+  service: { name: nginx, state: restarted, enabled: true }
+
+- name: restart mewc-web
+  systemd:
+    name: mewc-web
+    state: restarted
+    enabled: true
+    daemon_reload: true

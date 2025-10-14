@@ -1,0 +1,13 @@
+mount_point: /mnt/mewc-volume
+app_root: /opt/mewc-web
+venv_dir: /opt/mewc-web/venv
+service_user: ubuntu
+bind_host: 127.0.0.1
+bind_port: 8000
+max_upload_mb: 20480
+allowed_exts: ["jpg", "jpeg", "png"]
+
+# Detector settings (override later if you want)
+detect_image: "zaandahl/mewc-detect:latest"           # e.g. "zaandahl/mewc-detect:latest" (leave blank to use stub)
+detect_cpus: 16             # conservative for POC; you’ve got plenty if you want more
+detect_confidence: 0.30

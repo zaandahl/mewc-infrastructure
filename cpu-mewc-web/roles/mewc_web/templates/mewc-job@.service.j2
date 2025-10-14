@@ -1,0 +1,20 @@
+[Unit]
+Description=MEWC job %i (detect)
+After=network-online.target docker.service
+Wants=docker.service
+
+[Service]
+User={{ service_user }}
+Group={{ service_user }}
+WorkingDirectory={{ app_root }}
+Environment="MEWC_MOUNT={{ mount_point }}"
+Environment="MEWC_ALLOWED_EXTS={{ allowed_exts | join(',') }}"
+Environment="DETECT_IMAGE={{ detect_image }}"
+Environment="DETECT_CPUS={{ detect_cpus }}"
+Environment="DETECT_CONFIDENCE={{ detect_confidence }}"
+Environment="VENV_PY={{ venv_dir }}/bin/python"
+ExecStart={{ app_root }}/bin/run_detect.sh %i
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
