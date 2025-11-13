@@ -77,3 +77,25 @@ resource "openstack_compute_volume_attach_v2" "attach_data" {
 output "instance_ip" {
   value = openstack_compute_instance_v2.cpu-mewc-web.access_ip_v4
 }
+
+# --- DNS apex A -> instance public IP (no floating IP) ---
+
+# Look up your DNS zone (Designate)
+data "openstack_dns_zone_v2" "mewcgpu" {
+  name = "mewcgpu.cloud.edu.au."  # trailing dot
+}
+
+# Create/maintain the apex A record pointing to the instance's public IP
+resource "openstack_dns_recordset_v2" "apex_a" {
+  zone_id = data.openstack_dns_zone_v2.mewcgpu.id
+  name    = data.openstack_dns_zone_v2.mewcgpu.name  # apex == zone name
+  type    = "A"
+  ttl     = 300
+  records = [openstack_compute_instance_v2.cpu-mewc-web.access_ip_v4]
+
+  depends_on = [openstack_compute_instance_v2.cpu-mewc-web]
+}
+
+output "site_url" {
+  value = "http://${data.openstack_dns_zone_v2.mewcgpu.name}"
+}
