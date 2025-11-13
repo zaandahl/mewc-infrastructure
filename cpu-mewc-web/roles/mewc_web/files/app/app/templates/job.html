@@ -17,7 +17,25 @@
       <a href="/jobs/{{ job_id }}/download/detections.csv">Download detections.csv</a>
     </div>
   </div>
+
+  <div id="det-section" class="card" style="margin-top:12px; display:none;">
+    <h3>Detections</h3>
+    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start">
+      <div style="flex:1; min-width:280px; max-width:420px;">
+        <canvas id="detChart" width="400" height="400"></canvas>
+      </div>
+      <div style="flex:1; min-width:300px;">
+        <table id="counts" style="min-width:300px">
+          <thead><tr><th>Category</th><th style="text-align:right">Count</th></tr></thead>
+          <tbody><tr><td colspan="2" style="opacity:.7">No data yet</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
+
+<!-- Chart.js (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 const jobId = "{{ job_id }}";
@@ -26,9 +44,56 @@ const pg = document.getElementById('pg');
 const lg = document.getElementById('log');
 const lk = document.getElementById('links');
 const btn = document.getElementById('startBtn');
+const detSection = document.getElementById('det-section');
+const countsBody = document.querySelector('#counts tbody');
+const chartCtx = document.getElementById('detChart').getContext('2d');
+
+let pie;
+
+function upsertPie(labels, values) {
+  if (!pie) {
+    pie = new Chart(chartCtx, {
+      type: 'pie',
+      data: { labels, datasets: [{ data: values }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom' } }
+      }
+    });
+  } else {
+    pie.data.labels = labels;
+    pie.data.datasets[0].data = values;
+    pie.update();
+  }
+}
+
+async function loadSummary() {
+  try {
+    const r = await fetch(`/jobs/${jobId}/summary`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    detSection.style.display = 'block';
+
+    // table
+    countsBody.innerHTML = '';
+    (d.counts || []).forEach(([name, n]) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${name}</td><td style="text-align:right">${n}</td>`;
+      countsBody.appendChild(tr);
+    });
+    if (!d.counts || d.counts.length === 0) {
+      countsBody.innerHTML = '<tr><td colspan="2" style="opacity:.7">No detections</td></tr>';
+    }
+
+    // chart
+    const labels = (d.counts || []).map(x => x[0]);
+    const values = (d.counts || []).map(x => x[1]);
+    if (labels.length) upsertPie(labels, values);
+  } catch { /* ignore */ }
+}
 
 async function poll() {
-  const r = await fetch(`/jobs/${jobId}/status`);
+  const r = await fetch(`/jobs/${jobId}/status`, { cache: 'no-store' });
   if (!r.ok) return;
   const s = await r.json();
   st.textContent = s.status || 'unknown';
@@ -36,23 +101,28 @@ async function poll() {
     pg.textContent = `${s.processed} / ${s.total}`;
   }
   lg.textContent = s.log_tail || '';
-  if (s.status === 'done') lk.style.display = 'block';
+  if (s.status === 'done' || s.status === 'error') {
+    lk.style.display = 'block';
+  }
+  loadSummary(); // try each poll so chart/table appear as soon as data exists
   setTimeout(poll, 2000);
 }
 
 btn.addEventListener('click', async () => {
   btn.disabled = true;
-  const r = await fetch(`/jobs/${jobId}/start`, {method:'POST'});
+  const r = await fetch(`/jobs/${jobId}/start`, { method:'POST' });
   if (!r.ok) { btn.disabled = false; return; }
   poll();
 });
 
+// init if server rendered state exists
 {% if state.status %}
   st.textContent = "{{ state.status }}";
   pg.textContent = "{{ state.processed|default(0) }} / {{ state.total|default(count) }}";
-  {% if has_md and has_csv %} lk.style.display = 'block'; {% endif %}
+  {% if has_md %} detSection.style.display = 'block'; {% endif %}
+  {% if has_md or has_csv %} lk.style.display = 'block'; {% endif %}
   poll();
+  loadSummary();
 {% endif %}
 </script>
 {% endblock %}
-

@@ -55,7 +55,7 @@ if [[ -n "${DETECT_IMAGE:-}" ]]; then
         --cpus="${DETECT_CPUS}"
         -v "${UPLOADS}:/images"
         -e INPUT_DIR="/images"
-        -e MD_FILE="/images/${DETECT_MD_FILE}"
+        -e MD_FILE="${DETECT_MD_FILE}"        # 🔍 change 1: pass just the filename
         -e THRESHOLD="${DETECT_CONFIDENCE}"
         -e RECURSIVE="True"
         -e RELATIVE_FILENAMES="True"
@@ -75,7 +75,10 @@ if [[ -n "${DETECT_IMAGE:-}" ]]; then
 
   # Progress watcher: count images from md.json every 10s (when it appears)
   while kill -0 "${RUN_PID}" 2>/dev/null; do
-    PROCESSED="$("${PY}" - "$OUT_PATH" <<'PYCODE' 2>/dev/null || true
+    # 🔍 change 2: look in either uploads/md.json or uploads/images/md.json
+    WATCH="${OUT_PATH}"
+    [[ -f "${WATCH}" ]] || WATCH="${UPLOADS}/images/${DETECT_MD_FILE}"
+    PROCESSED="$("${PY}" - "$WATCH" <<'PYCODE' 2>/dev/null || true
 import json, sys, pathlib
 p=pathlib.Path(sys.argv[1])
 if not p.exists():
@@ -98,11 +101,6 @@ EOF
 
   wait "${RUN_PID}" || rc=$?
 
-# Ensure final md.json lands in detect/
-if [[ -f "${OUT_PATH}" ]]; then
-  cp -f "${OUT_PATH}" "${OUTDIR}/md.json"
-fi
-
 else
   echo "[stub] DETECT_IMAGE unset; creating dummy md.json" >> "${LOG}"
   "${PY}" - "$JOB_DIR" > "${OUTDIR}/md.json" <<'PYCODE'
@@ -122,9 +120,20 @@ json.dump({"images":images,"detection_categories":{"1":"animal"}}, sys.stdout)
 PYCODE
 fi
 
+# 🔍 change 3: normalize output to detect/md.json from any known location
+for CAND in \
+  "${OUT_PATH}" \
+  "${UPLOADS}/images/${DETECT_MD_FILE}"
+do
+  if [[ -f "$CAND" ]]; then
+    cp -f "$CAND" "${OUTDIR}/md.json"
+    break
+  fi
+done
+
 STATUS="error"
-if [[ -f "${OUTDIR}/md.json" ]] || [[ -f "${OUT_PATH}" ]]; then
-  [[ -f "${OUTDIR}/md.json" ]] || cp -f "${OUT_PATH}" "${OUTDIR}/md.json"
+if [[ -f "${OUTDIR}/md.json" ]] || [[ -f "${OUT_PATH}" ]] || [[ -f "${UPLOADS}/images/${DETECT_MD_FILE}" ]]; then
+  [[ -f "${OUTDIR}/md.json" ]] || cp -f "${UPLOADS}/images/${DETECT_MD_FILE}" "${OUTDIR}/md.json" 2>/dev/null || true
   STATUS="done"
 fi
 

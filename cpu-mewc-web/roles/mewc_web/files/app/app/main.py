@@ -1,4 +1,4 @@
-import os, uuid, zipfile, shutil, subprocess, json, io
+import os, uuid, zipfile, shutil, subprocess, json, io, csv
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -12,10 +12,14 @@ from fastapi.templating import Jinja2Templates
 MOUNT = Path(os.getenv("MEWC_MOUNT", "/mnt/mewc-volume")).resolve()
 ALLOWED = set(os.getenv("MEWC_ALLOWED_EXTS", "jpg,jpeg,png").split(","))
 MAX_MB = int(os.getenv("MEWC_MAX_UPLOAD_MB", "20480"))  # per request
+DATA_ROOT = Path("/mnt/mewc-volume")
 
 app = FastAPI(title="MEWC Upload POC")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+def job_dir(job_id: str) -> Path:
+    return DATA_ROOT / "jobs" / job_id
 
 def job_dirs(job_id: str):
     base = MOUNT / "jobs" / job_id
@@ -165,3 +169,48 @@ async def download(job_id: str, name: str):
     if not p.exists():
         return HTMLResponse("Not ready", status_code=404)
     return FileResponse(str(p), filename=name)
+
+@app.get("/jobs/{job_id}/files/detections.csv")
+def download_csv(job_id: str):
+    ddir = job_dir(job_id) / "detect"
+    csv_path = ddir / "detections.csv"
+    if csv_path.exists():
+        return FileResponse(csv_path, filename="detections.csv", media_type="text/csv")
+    md_path = ddir / "md.json"
+    if not md_path.exists():
+        return JSONResponse({"error":"No outputs yet"}, status_code=404)
+    tmp_csv = ddir / "_tmp_detections.csv"
+    data = json.loads(md_path.read_text())
+    cats = data.get("detection_categories", {})
+    with tmp_csv.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["file","category","category_name","conf","bbox_x","bbox_y","bbox_w","bbox_h"])
+        for im in data.get("images", []):
+            for d in im.get("detections", []):
+                cat = str(d.get("category",""))
+                name = cats.get(cat, cat)
+                bbox = d.get("bbox",[None,None,None,None])
+                w.writerow([im.get("file",""), cat, name, d.get("conf",""), *bbox])
+    return FileResponse(tmp_csv, filename="detections.csv", media_type="text/csv")
+
+@app.get("/jobs/{job_id}/summary")
+def job_summary(job_id: str):
+    ddir = job_dir(job_id) / "detect"
+    csv_path = ddir / "detections.csv"
+    counts, total = {}, 0
+    if csv_path.exists():
+        with csv_path.open() as f:
+            for row in csv.DictReader(f):
+                name = (row.get("category_name") or row.get("category") or "unknown").strip()
+                counts[name] = counts.get(name, 0) + 1; total += 1
+    else:
+        md_path = ddir / "md.json"
+        if not md_path.exists():
+            return JSONResponse({"status":"pending","total":0,"counts":[]}, status_code=202)
+        data = json.loads(md_path.read_text()); cats = data.get("detection_categories", {})
+        for im in data.get("images", []):
+            for d in im.get("detections", []):
+                name = cats.get(str(d.get("category","")), "unknown")
+                counts[name] = counts.get(name, 0) + 1; total += 1
+    items = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    return {"status":"ok","total": total, "counts": items}
