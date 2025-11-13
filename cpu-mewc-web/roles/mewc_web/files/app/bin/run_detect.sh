@@ -98,10 +98,10 @@ EOF
 
   wait "${RUN_PID}" || rc=$?
 
-  # Move final md.json into detect/
-  if [[ -f "${OUT_PATH}" ]]; then
-    mv -f "${OUT_PATH}" "${OUTDIR}/md.json"
-  fi
+# Ensure final md.json lands in detect/
+if [[ -f "${OUT_PATH}" ]]; then
+  cp -f "${OUT_PATH}" "${OUTDIR}/md.json"
+fi
 
 else
   echo "[stub] DETECT_IMAGE unset; creating dummy md.json" >> "${LOG}"
@@ -123,8 +123,13 @@ PYCODE
 fi
 
 STATUS="error"
-if [[ -f "${OUTDIR}/md.json" ]]; then
+if [[ -f "${OUTDIR}/md.json" ]] || [[ -f "${OUT_PATH}" ]]; then
+  [[ -f "${OUTDIR}/md.json" ]] || cp -f "${OUT_PATH}" "${OUTDIR}/md.json"
   STATUS="done"
+fi
+
+if [[ "${STATUS}" = "done" ]]; then
+  "${PY}" "${APP_ROOT}/app/md_to_csv.py" "${OUTDIR}/md.json" "${OUTDIR}/detections.csv" >> "${LOG}" 2>&1 || true
 fi
 
 # write final state unconditionally
