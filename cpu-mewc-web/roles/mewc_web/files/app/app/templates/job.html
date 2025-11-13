@@ -18,24 +18,16 @@
     </div>
   </div>
 
-  <div id="det-section" class="card" style="margin-top:12px; display:none;">
-    <h3>Detections</h3>
-    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start">
-      <div style="flex:1; min-width:280px; max-width:420px;">
-        <canvas id="detChart" width="400" height="400"></canvas>
-      </div>
-      <div style="flex:1; min-width:300px;">
-        <table id="counts" style="min-width:300px">
-          <thead><tr><th>Category</th><th style="text-align:right">Count</th></tr></thead>
-          <tbody><tr><td colspan="2" style="opacity:.7">No data yet</td></tr></tbody>
-        </table>
-      </div>
+  <div id="galleryCard" class="card" style="margin-top:12px; display:none;">
+    <h3>Detections gallery</h3>
+    <div style="margin-bottom:8px">
+      <button id="prevBtn">◀ Prev</button>
+      <button id="nextBtn">Next ▶</button>
+      <span id="pageInfo" style="margin-left:8px; opacity:.8"></span>
     </div>
+    <div id="gallery" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px"></div>
   </div>
 </div>
-
-<!-- Chart.js (CDN) -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 const jobId = "{{ job_id }}";
@@ -44,68 +36,124 @@ const pg = document.getElementById('pg');
 const lg = document.getElementById('log');
 const lk = document.getElementById('links');
 const btn = document.getElementById('startBtn');
-const detSection = document.getElementById('det-section');
-const countsBody = document.querySelector('#counts tbody');
-const chartCtx = document.getElementById('detChart').getContext('2d');
 
-let pie;
+const galleryCard = document.getElementById('galleryCard');
+const gallery = document.getElementById('gallery');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const pageInfo = document.getElementById('pageInfo');
 
-function upsertPie(labels, values) {
-  if (!pie) {
-    pie = new Chart(chartCtx, {
-      type: 'pie',
-      data: { labels, datasets: [{ data: values }] },
-      options: {
-        responsive: true,
-        plugins: { legend: { position: 'bottom' } }
-      }
-    });
-  } else {
-    pie.data.labels = labels;
-    pie.data.datasets[0].data = values;
-    pie.update();
-  }
+let offset = 0, limit = 12, total = 0;
+let pollTimer = null;
+let lastStatus = null;
+let galleryBootstrapped = false;
+let lastPageKey = '';
+
+function schedule(ms){ clearTimeout(pollTimer); pollTimer = setTimeout(poll, ms); }
+
+function drawBoxes(img, canvas, dets) {
+  const w = img.naturalWidth || 1, h = img.naturalHeight || 1;
+  const dw = img.clientWidth, dh = img.clientHeight;
+  canvas.width = dw; canvas.height = dh;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2; ctx.font = '12px sans-serif';
+  dets.forEach(d => {
+    const [x,y,bw,bh] = d.bbox;
+    const rx = x*dw, ry = y*dh, rw = bw*dw, rh = bh*dh;
+    ctx.strokeStyle = '#00ff88';
+    ctx.strokeRect(rx, ry, rw, rh);
+    const label = (d.name || d.category) + ' ' + (d.conf?.toFixed?.(2) ?? '');
+    const tw = ctx.measureText(label).width + 6;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(rx, Math.max(0, ry-14), tw, 14);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, rx+3, Math.max(10, ry-3));
+  });
 }
 
-async function loadSummary() {
-  try {
-    const r = await fetch(`/jobs/${jobId}/summary`, { cache: 'no-store' });
-    if (!r.ok) return;
-    const d = await r.json();
-    detSection.style.display = 'block';
+function cardFor(item) {
+  const wrap = document.createElement('div');
+  wrap.style.position = 'relative';
+  wrap.style.border = '1px solid #222';
+  wrap.style.borderRadius = '8px';
+  wrap.style.padding = '6px';
+  wrap.style.background = '#0b0c10';
 
-    // table
-    countsBody.innerHTML = '';
-    (d.counts || []).forEach(([name, n]) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${name}</td><td style="text-align:right">${n}</td>`;
-      countsBody.appendChild(tr);
-    });
-    if (!d.counts || d.counts.length === 0) {
-      countsBody.innerHTML = '<tr><td colspan="2" style="opacity:.7">No detections</td></tr>';
-    }
+  const img = new Image();
+  img.style.width = '100%';
+  img.style.display = 'block';
+  img.loading = 'lazy';
+  img.src = encodeURI(`/jobs/${jobId}/files/raw/${item.file}`);
 
-    // chart
-    const labels = (d.counts || []).map(x => x[0]);
-    const values = (d.counts || []).map(x => x[1]);
-    if (labels.length) upsertPie(labels, values);
-  } catch { /* ignore */ }
+  const canvas = document.createElement('canvas');
+  canvas.style.position = 'absolute';
+  canvas.style.left = '6px';
+  canvas.style.top = '6px';
+  canvas.style.pointerEvents = 'none';
+  canvas.style.width = 'calc(100% - 12px)';
+  canvas.style.height = 'auto';
+
+  img.addEventListener('load', () => drawBoxes(img, canvas, item.detections));
+  wrap.appendChild(img);
+  wrap.appendChild(canvas);
+
+  const cap = document.createElement('div');
+  cap.style.marginTop = '6px';
+  cap.style.fontSize = '12px';
+  const top = item.detections[0];
+  cap.textContent = `${(top.name || top.category)} (${item.detections.length} dets)`;
+  wrap.appendChild(cap);
+
+  return wrap;
 }
+
+async function loadPage() {
+  const r = await fetch(`/jobs/${jobId}/detections?offset=${offset}&limit=${limit}`, {cache:'no-store'});
+  if (!r.ok) return;
+  const d = await r.json();
+  total = d.total || 0;
+
+  // If nothing changed, do nothing (prevents image reloads).
+  const pageKey = (d.items || []).map(it => it.file + '|' + it.detections.length).join(',');
+  if (pageKey === lastPageKey) return;
+  lastPageKey = pageKey;
+
+  gallery.innerHTML = '';
+  (d.items || []).forEach(it => gallery.appendChild(cardFor(it)));
+  galleryCard.style.display = total ? 'block' : 'none';
+  const page = Math.floor(offset/limit)+1, pages = Math.max(1, Math.ceil(total/limit));
+  pageInfo.textContent = `Page ${page} / ${pages} — ${total} images with detections`;
+
+  prevBtn.disabled = offset <= 0;
+  nextBtn.disabled = offset + limit >= total;
+}
+
+prevBtn.onclick = () => { offset = Math.max(0, offset - limit); loadPage(); };
+nextBtn.onclick = () => { offset = Math.max(0, Math.min(total - limit, offset + limit)); loadPage(); };
 
 async function poll() {
   const r = await fetch(`/jobs/${jobId}/status`, { cache: 'no-store' });
-  if (!r.ok) return;
+  if (!r.ok) return schedule(2000);
   const s = await r.json();
-  st.textContent = s.status || 'unknown';
+
+  const status = s.status || 'unknown';
+  st.textContent = status;
   if (typeof s.processed === 'number' && typeof s.total === 'number') {
     pg.textContent = `${s.processed} / ${s.total}`;
   }
   lg.textContent = s.log_tail || '';
-  if (s.status === 'done' || s.status === 'error') {
+
+  if (status === 'done' || status === 'error') {
     lk.style.display = 'block';
+    if (!galleryBootstrapped) {
+      galleryBootstrapped = true;
+      loadPage();              // one-time load after finish
+    }
+    return;                     // stop polling to avoid reloads
   }
-  loadSummary(); // try each poll so chart/table appear as soon as data exists
-  setTimeout(poll, 2000);
+
+  lastStatus = status;
+  schedule(2000);
 }
 
 btn.addEventListener('click', async () => {
@@ -115,14 +163,19 @@ btn.addEventListener('click', async () => {
   poll();
 });
 
-// init if server rendered state exists
+// If server rendered a status, initialize appropriately
 {% if state.status %}
   st.textContent = "{{ state.status }}";
   pg.textContent = "{{ state.processed|default(0) }} / {{ state.total|default(count) }}";
-  {% if has_md %} detSection.style.display = 'block'; {% endif %}
   {% if has_md or has_csv %} lk.style.display = 'block'; {% endif %}
-  poll();
-  loadSummary();
+  {% if state.status in ['done','error'] %}
+    galleryBootstrapped = true;
+    loadPage();
+  {% else %}
+    poll();
+  {% endif %}
+{% else %}
+  // no state rendered; idle
 {% endif %}
 </script>
 {% endblock %}

@@ -42,6 +42,42 @@ def ok_ext(name: str) -> bool:
 def state_path(job_id: str) -> Path:
     return MOUNT / "jobs" / job_id / "state.json"
 
+# --- helpers for md.json and safe file serving ---
+
+def find_md(job_id: str) -> Optional[Path]:
+    """Return canonical detect/md.json; if found elsewhere, copy it there."""
+    d = job_dir(job_id)
+    candidates = [
+        d / "detect" / "md.json",
+        d / "uploads" / "md.json",
+        d / "uploads" / "images" / "md.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            canon = d / "detect" / "md.json"
+            canon.parent.mkdir(parents=True, exist_ok=True)
+            if p != canon:
+                try:
+                    canon.write_bytes(p.read_bytes())
+                except Exception:
+                    pass
+            return canon
+    return None
+
+def safe_upload_path(job_id: str, rel: str) -> Optional[Path]:
+    """Resolve a path under the job's uploads dir without traversal."""
+    base = job_dir(job_id) / "uploads"
+    try:
+        p = (base / rel).resolve()
+        base_r = base.resolve()
+    except Exception:
+        return None
+    if str(p).startswith(str(base_r)) and p.exists():
+        return p
+    return None
+
+# --- routes ---
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "max_mb": MAX_MB})
@@ -114,7 +150,7 @@ async def job_view(request: Request, job_id: str):
     if sp.exists():
         try: st = json.loads(sp.read_text())
         except: st = {}
-    md = (detect/"md.json").exists()
+    md = bool(find_md(job_id))
     csvf = (detect/"detections.csv").exists()
     return templates.TemplateResponse(
         "job.html",
@@ -123,12 +159,10 @@ async def job_view(request: Request, job_id: str):
 
 @app.post("/jobs/{job_id}/start")
 async def start_job(job_id: str):
-    # only stage supported now is 'detect'
     base, uploads, _, _ = job_dirs(job_id)
     if not uploads.exists() or not any(uploads.rglob("*")):
         return JSONResponse({"ok": False, "error": "No uploads found"}, status_code=400)
 
-    # start systemd unit
     r = subprocess.run(
         ["sudo","/bin/systemctl","start",f"mewc-job@{job_id}.service"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -160,7 +194,6 @@ async def status(job_id: str):
 
 @app.get("/jobs/{job_id}/download/{name}")
 async def download(job_id: str, name: str):
-    # allow only expected outputs
     allowed = {"md.json":"detect/md.json", "detections.csv":"detect/detections.csv"}
     rel = allowed.get(name)
     if not rel:
@@ -170,14 +203,16 @@ async def download(job_id: str, name: str):
         return HTMLResponse("Not ready", status_code=404)
     return FileResponse(str(p), filename=name)
 
+# --- CSV + summary (robust to md.json location) ---
+
 @app.get("/jobs/{job_id}/files/detections.csv")
 def download_csv(job_id: str):
     ddir = job_dir(job_id) / "detect"
     csv_path = ddir / "detections.csv"
     if csv_path.exists():
         return FileResponse(csv_path, filename="detections.csv", media_type="text/csv")
-    md_path = ddir / "md.json"
-    if not md_path.exists():
+    md_path = find_md(job_id)
+    if not md_path:
         return JSONResponse({"error":"No outputs yet"}, status_code=404)
     tmp_csv = ddir / "_tmp_detections.csv"
     data = json.loads(md_path.read_text())
@@ -204,8 +239,8 @@ def job_summary(job_id: str):
                 name = (row.get("category_name") or row.get("category") or "unknown").strip()
                 counts[name] = counts.get(name, 0) + 1; total += 1
     else:
-        md_path = ddir / "md.json"
-        if not md_path.exists():
+        md_path = find_md(job_id)
+        if not md_path:
             return JSONResponse({"status":"pending","total":0,"counts":[]}, status_code=202)
         data = json.loads(md_path.read_text()); cats = data.get("detection_categories", {})
         for im in data.get("images", []):
@@ -214,3 +249,43 @@ def job_summary(job_id: str):
                 counts[name] = counts.get(name, 0) + 1; total += 1
     items = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
     return {"status":"ok","total": total, "counts": items}
+
+# --- raw file serving + detections paging for bbox gallery ---
+
+@app.get("/jobs/{job_id}/files/raw/{relpath:path}")
+def get_raw(job_id: str, relpath: str):
+    p = safe_upload_path(job_id, relpath)
+    if not p:
+        return JSONResponse({"error":"not found"}, status_code=404)
+    return FileResponse(p)
+
+@app.get("/jobs/{job_id}/detections")
+def list_detections(job_id: str, offset: int = 0, limit: int = 12, min_conf: float = 0.0):
+    md = find_md(job_id)
+    if not md:
+        return JSONResponse({"items": [], "total": 0}, status_code=202)
+    data = json.loads(md.read_text())
+    cats = data.get("detection_categories", {})
+    items = []
+    for im in data.get("images", []):
+        file_rel = im.get("file", "")
+        if not file_rel:
+            continue
+        dets = []
+        for d in im.get("detections", []):
+            try:
+                conf = float(d.get("conf", 0))
+            except Exception:
+                conf = 0.0
+            if conf < min_conf:
+                continue
+            dets.append({
+                "bbox": d.get("bbox", [0,0,0,0]),
+                "conf": conf,
+                "category": str(d.get("category","")),
+                "name": cats.get(str(d.get("category","")), "")
+            })
+        if dets:
+            items.append({"file": file_rel, "detections": dets})
+    total = len(items)
+    return {"items": items[offset:offset+limit], "total": total}
