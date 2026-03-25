@@ -1,9 +1,11 @@
 ---
 - hosts: all
+  become: yes
+
   vars:
     ansible_user: ubuntu
     ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+
   tasks:
     - name: Add 'ubuntu' user to 'docker' group
       user:
@@ -11,50 +13,114 @@
         groups: docker
         append: yes
 
-    # Stop Docker service
-    - name: Stop Docker service
+    - name: Stop Docker service if present
       systemd:
         name: docker
         state: stopped
+      failed_when: false
 
-    # Move the Docker data directory to the new volume
-    - name: Move Docker's data directory to the new volume
-      command: mv /var/lib/docker /mnt/mewc-volume/
+    - name: Stop containerd service if present
+      systemd:
+        name: containerd
+        state: stopped
+      failed_when: false
 
-    # Ensure Docker's new data directory exists (precautionary)
-    - name: Ensure Docker's new data directory exists
+    - name: Check for existing Docker data directory
+      stat:
+        path: /var/lib/docker
+      register: docker_data_dir
+
+    - name: Check for Docker data directory on mounted volume
+      stat:
+        path: /mnt/mewc-volume/docker
+      register: docker_volume_dir
+
+    - name: Move Docker data directory to mounted volume
+      command: mv /var/lib/docker /mnt/mewc-volume/docker
+      when:
+        - docker_data_dir.stat.exists
+        - not docker_volume_dir.stat.exists
+
+    - name: Check for existing containerd data directory
+      stat:
+        path: /var/lib/containerd
+      register: containerd_data_dir
+
+    - name: Check for containerd data directory on mounted volume
+      stat:
+        path: /mnt/mewc-volume/containerd
+      register: containerd_volume_dir
+
+    - name: Move containerd data directory to mounted volume
+      command: mv /var/lib/containerd /mnt/mewc-volume/containerd
+      when:
+        - containerd_data_dir.stat.exists
+        - not containerd_volume_dir.stat.exists
+
+    - name: Ensure Docker data directory exists on mounted volume
       file:
         path: /mnt/mewc-volume/docker
         state: directory
+        mode: "0711"
 
-    # Modify Docker's systemd service file
-    - name: Point Docker to the new data directory
-      lineinfile:
-        path: /lib/systemd/system/docker.service
-        regexp: '^ExecStart='
-        line: 'ExecStart=/usr/bin/dockerd --data-root=/mnt/mewc-volume/docker -H fd://'
-      register: docker_service_changed
+    - name: Ensure containerd data directory exists on mounted volume
+      file:
+        path: /mnt/mewc-volume/containerd
+        state: directory
+        mode: "0711"
 
-    # Reload the systemd configuration
+    - name: Ensure Docker systemd override directory exists
+      file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Configure Docker data-root on mounted volume
+      copy:
+        dest: /etc/systemd/system/docker.service.d/override.conf
+        mode: "0644"
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart=/usr/bin/dockerd --data-root=/mnt/mewc-volume/docker -H fd:// --containerd=/run/containerd/containerd.sock
+      register: docker_override
+
+    - name: Generate default containerd configuration
+      command: containerd config default
+      register: containerd_default_config
+      changed_when: false
+
+    - name: Configure containerd root on mounted volume
+      copy:
+        dest: /etc/containerd/config.toml
+        mode: "0644"
+        content: "{{ containerd_default_config.stdout | regex_replace('root = \"/var/lib/containerd\"', 'root = \"/mnt/mewc-volume/containerd\"') }}"
+      register: containerd_config
+
     - name: Reload systemd configuration
-      command: systemctl daemon-reload
-      when: docker_service_changed.changed
+      systemd:
+        daemon_reload: yes
+      when: docker_override.changed or containerd_config.changed
 
-    # Start Docker
+    - name: Start containerd service
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+
     - name: Start Docker service
       systemd:
         name: docker
         state: started
+        enabled: yes
 
     - name: Install necessary Python packages for Docker module
       apt:
         name:
           - python3-pip
         state: present
+
     - name: Install Docker SDK for Python
       pip:
         name: docker
         state: present
-
-
-
