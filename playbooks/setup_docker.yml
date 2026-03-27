@@ -90,17 +90,24 @@
       register: containerd_default_config
       changed_when: false
 
-    - name: Configure containerd root on mounted volume
+    - name: Write containerd configuration
       copy:
         dest: /etc/containerd/config.toml
         mode: "0644"
-        content: "{{ containerd_default_config.stdout | regex_replace('root = \"/var/lib/containerd\"', 'root = \"/mnt/mewc-volume/containerd\"') }}"
-      register: containerd_config
+        content: "{{ containerd_default_config.stdout }}"
+      register: containerd_config_base
+
+    - name: Set containerd root on mounted volume
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*root\s*='
+        line: 'root = "/mnt/mewc-volume/containerd"'
+      register: containerd_root_line
 
     - name: Reload systemd configuration
       systemd:
         daemon_reload: yes
-      when: docker_override.changed or containerd_config.changed
+      when: docker_override.changed
 
     - name: Start containerd service
       systemd:
