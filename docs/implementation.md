@@ -1,11 +1,12 @@
-# Infrastructure hardening scope
+# Infrastructure and pipeline scope
 
 Baseline: `c061a9c89675ee7196f43f7917778198a8457ee6`.
 
-This change retains Terraform, OpenStack, Ansible and independently reusable
-MEWC containers. It targets new private Ubuntu 24.04 deployments and a private,
-single-operator detector interface. It does not implement the complete five-stage
-MEWC pipeline or repair companion repositories.
+The first hardening PR retained Terraform, OpenStack, Ansible and independently
+reusable MEWC containers, and secured new private Ubuntu 24.04 deployments plus
+a single-operator detector interface. The subsequent integration adds the full
+five-stage command-line workflow and consumes coordinated companion fixes via
+[pipeline-sources.lock.json](../pipeline-sources.lock.json). See [pipeline.md](pipeline.md).
 
 ## Decisions
 
@@ -40,10 +41,21 @@ Ansible validation to new disposable CPU/GPU instances. Public CI uses synthetic
 inputs and no cloud credentials. Runtime, retention, reboot and cleanup evidence
 must be labelled separately from static or mocked checks.
 
-## Companion work
+## Companion integration
 
-The detector subprocess exit contract, crop identity/indexing, prediction rename
-and tie handling, metadata joins and boxing/filter semantics need coordinated
-fixes in their owning repositories. This PR must not claim those findings closed.
-A complete five-stage runner, performance optimisation, full dataset rehearsal,
-public hosting and RStudio support are subsequent work.
+The follow-up integrates detector exit propagation, original detection-index crop
+identities, immutable predictions, complete probability vectors, explicit model
+axis-to-class-code mapping, lossless Camelot exports, and eligible-only boxing.
+A versioned source lock builds the compatible image graph without vendoring or
+patching installed stage code. The optional web remains detector-only.
+
+New runs use the operator-approved `category-confidence-v1` policy: descending
+confidence suppression only within a detector category, preserving configured
+numeric thresholds. Mixed categories export to `mixed`. Existing results are
+never migrated or relabelled. Exact classification ties remain canonical; the
+single-class Camelot adapter fails explicitly when it cannot represent them.
+
+The operator reported that the original 24-site photographs had been removed,
+and supplied a separate small JPEG example for integration testing. Frozen old
+crops support an execution-equivalence comparison, not a new claim about training
+labels or species accuracy. Evidence belongs in the pipeline validation record.

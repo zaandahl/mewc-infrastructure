@@ -1,4 +1,4 @@
-name: Validate private infrastructure
+name: Validate infrastructure and pipeline
 on:
   pull_request:
   push:
@@ -24,8 +24,8 @@ jobs:
         run: .venv/bin/python -m pytest -q
       - name: Syntax and static checks
         run: |
-          .venv/bin/python -m compileall -q mewc_infra playbooks/files cpu-mewc-web/roles/mewc_web/files/app/app
-          .venv/bin/ruff check mewc_infra playbooks/files cpu-mewc-web/roles/mewc_web/files/app/app
+          .venv/bin/python -m compileall -q mewc_infra mewc_pipeline scripts/build_pipeline_images.py playbooks/files cpu-mewc-web/roles/mewc_web/files/app/app
+          .venv/bin/ruff check mewc_infra mewc_pipeline scripts/build_pipeline_images.py playbooks/files cpu-mewc-web/roles/mewc_web/files/app/app
           shellcheck create_keypair.sh gpu/*.sh gpu-complex/*.sh cpu-rstudio/*.sh cpu-mewc-web/*.sh cpu-mewc-web/roles/mewc_web/files/app/bin/*.sh
           .venv/bin/ansible-playbook --syntax-check -i localhost, playbooks/site.yml
           .venv/bin/ansible-playbook --syntax-check -i localhost, cpu-mewc-web/web_site.yml
@@ -44,4 +44,5 @@ jobs:
             terraform -chdir=infra/compute fmt -check
             terraform -chdir=infra/compute validate
             python -m mewc_infra --help
+            python -m mewc_pipeline --help
           '

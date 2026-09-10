@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "infrastructure_source_commit": "062df74",
+  "source_image_lock": "pipeline-images.json",
+  "complete_run": {
+    "images": 43,
+    "crops": 45,
+    "state": "complete",
+    "fingerprint": "783934caffed782082116625897c6e5e7b3562f5c959cb9b7fee648795d48fc3",
+    "prediction_rows": 45,
+    "export_files": 110,
+    "transferred_export_verified": true,
+    "all_stages_reused_after_verification": true,
+    "original_images_bytes_sizes_mtimes_unchanged": true
+  },
+  "blank_run": {
+    "images": 1,
+    "crops": 0,
+    "state": "success-empty",
+    "model_runtime_validated": false,
+    "interruption_cleanup_and_resume_verified": true,
+    "failed_attempt_preserved": true,
+    "export_files": 25,
+    "transferred_export_verified": true
+  },
+  "drawing": {
+    "rendered": 43,
+    "errors": 0,
+    "original_hashes_unchanged": true
+  },
+  "numerical": {
+    "crops": 12,
+    "classes": 96,
+    "rtol": 1e-05,
+    "atol": 1e-06,
+    "initial_direct_candidate": {
+      "passed": false,
+      "max_absolute_difference": 0.0013530254364013672,
+      "failing_probability_entries": 238,
+      "top_sets_equal": true
+    },
+    "restored_historical_execution": {
+      "passed": true,
+      "runtime": {
+        "tensorflow": "2.16.1",
+        "keras": "3.3.3",
+        "python": "3.11.0rc1 (main, Aug 12 2022, 10:02:14) [GCC 11.2.0]",
+        "image_id": "sha256:40b4dce61473a1652e51a8b7f484df24531bc53abd7a0fbaf68e5a01e749a077",
+        "prediction_contract_sha256": "13397e64bec23167285d7b6f9c443fc9280866d885b385c59adc3d34e81a3498",
+        "tensorflow_optimizer_jit": "",
+        "xla_flags": "--xla_gpu_cuda_data_dir=/usr/local/cuda",
+        "tf_xla_flags": null,
+        "tf_num_intraop_threads": "4",
+        "tf_num_interop_threads": "2",
+        "model_jit_compile": true,
+        "tensorflow_optimizer_jit_after_load": ""
+      },
+      "comparisons": {
+        "restored_vs_persisted_first": {
+          "passed": true,
+          "allclose": true,
+          "bitwise_equal": true,
+          "top_sets_equal": true,
+          "exact_tie_crop_count": 0,
+          "failing_probability_entries": 0,
+          "max_absolute_difference": 0.0,
+          "mean_absolute_difference": 0.0
+        },
+        "restored_vs_fresh_control": {
+          "passed": true,
+          "allclose": true,
+          "bitwise_equal": true,
+          "top_sets_equal": true,
+          "exact_tie_crop_count": 0,
+          "failing_probability_entries": 0,
+          "max_absolute_difference": 0.0,
+          "mean_absolute_difference": 0.0
+        },
+        "fresh_control_vs_persisted_first": {
+          "passed": true,
+          "allclose": true,
+          "bitwise_equal": true,
+          "top_sets_equal": true,
+          "exact_tie_crop_count": 0,
+          "failing_probability_entries": 0,
+          "max_absolute_difference": 0.0,
+          "mean_absolute_difference": 0.0
+        }
+      },
+      "probabilities_sha256": "69bfe90c8dad70833580497c6f50c1684bb82e76250f7dbaca0c9e22181a31a6",
+      "parent_independent_npz_check": true
+    }
+  },
+  "limitations": [
+    "Training/export class order unverified; historical lexical code ordering preserved.",
+    "Historical crop labels are not adjudicated species truth.",
+    "The original 24-site photographs were unavailable.",
+    "No species accuracy, abundance, or controlled speed claim."
+  ],
+  "model_assets_sha256": {
+    "class_map": "4b96eae3de75965ca86fe4bac79dc235f81179377bd9b2d86f6e2e378e5442d7",
+    "classifier": "3f01aaef0270af0dee335d2c262c25e7e1200244d2beb0b88fec9e3f966977f8",
+    "detector": "acd98883074f7ea31d5c69ff0492e723f55f83bed8baa7dd3e248e11a6d0e545",
+    "manifest": "74be2c3423d0b51c1ab8cdc9c0f5ab2c10ab4e2755acca54c9466876eaccd876"
+  }
+}

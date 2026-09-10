@@ -11,12 +11,18 @@ This revised path targets **new Ubuntu 24.04 x86-64 instances**. Existing
 installations require the [migration review](docs/migration.md) before changes.
 The old Terraform roots are deliberately disabled.
 
+The complete command-line inference workflow is documented in
+[Running the pipeline](docs/pipeline.md). It builds compatible stage images from
+locked companion commits, preserves original images and class codes, and verifies
+crops, predictions, metadata and review copies before export.
+
 | Profile | Scope |
 | --- | --- |
 | `cpu` | Verified volume and Docker/containerd host. |
 | `gpu` | Same host plus NVIDIA runtime integration using an existing working image driver and an explicit active Nectar reservation. |
 | `cpu-web` | CPU host plus private, single-operator detector upload, execution and downloads. |
-| RStudio / public web / full five-stage MEWC pipeline | Outside this change's supported scope. |
+| Full pipeline CLI | Five stages on a prepared host, with immutable snapshots, exact identity checks, resume and verified export. JPEG inputs for Camelot compatibility. |
+| RStudio / public web | Outside the supported scope. |
 
 See [validation evidence and limits](docs/validation.md),
 [review responses](docs/audit-response.md), and [dependency policy](docs/toolchain.md).

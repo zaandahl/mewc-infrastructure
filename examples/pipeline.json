@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "run_id": "example-run-001",
+  "storage_mount": "/srv/mewc",
+  "input_dir": "/srv/mewc/datasets/example-jpeg",
+  "run_dir": "/srv/mewc/runs/example-run-001",
+  "images": {
+    "detect": "sha256:REPLACE_WITH_BUILT_DETECT_IMAGE_ID",
+    "snip": "sha256:REPLACE_WITH_BUILT_SNIP_IMAGE_ID",
+    "predict": "sha256:REPLACE_WITH_BUILT_PREDICT_IMAGE_ID",
+    "exif": "sha256:REPLACE_WITH_BUILT_EXIF_IMAGE_ID",
+    "box": "sha256:REPLACE_WITH_BUILT_BOX_IMAGE_ID"
+  },
+  "model": {
+    "detector": "/srv/mewc/models/example/detector.pt",
+    "classifier": "/srv/mewc/models/example/classifier.keras",
+    "class_map": "/srv/mewc/models/example/class_map.yaml",
+    "manifest": "/srv/mewc/models/example/model-manifest.json"
+  },
+  "options": {
+    "THRESHOLD": 0.01,
+    "LOWER_CONF": 0.05,
+    "UPPER_CONF": 0.9,
+    "OVERLAP": 0.3,
+    "EDGE_DIST": 0.02,
+    "MIN_EDGES": 0,
+    "SNIP_SIZE": 600,
+    "BATCH_SIZE": 16,
+    "DRAW": true,
+    "TOP_CLASSES": true
+  },
+  "gpu": true,
+  "cpus": 8,
+  "memory": "32g",
+  "timeout_seconds": 86400,
+  "storage_uuid": "REPLACE_WITH_FILESYSTEM_UUID"
+}

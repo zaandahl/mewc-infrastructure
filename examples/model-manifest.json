@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "architecture": "ENB0",
+  "model_sha256": "REPLACE_WITH_SHA256_OF_CLASSIFIER_FILE",
+  "class_map_sha256": "REPLACE_WITH_SHA256_OF_CLASS_MAP_FILE",
+  "class_ids": ["10", "999"],
+  "class_order": ["example_species_a", "example_species_b"],
+  "class_order_provenance": "historical-unverified",
+  "input_shape": [null, 224, 224, 3],
+  "preprocessing": {
+    "color_mode": "rgb",
+    "interpolation": "bilinear",
+    "crop_to_aspect_ratio": false,
+    "value_range": [0, 255],
+    "external_normalization": "none",
+    "dtype": "float32"
+  }
+}
