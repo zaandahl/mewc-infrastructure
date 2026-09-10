@@ -1,291 +1,264 @@
-import os, uuid, zipfile, shutil, subprocess, json, io, csv
+import fcntl
+import json
+import os
+import shutil
+import stat
+import uuid
+import zipfile
 from pathlib import Path
-from typing import List, Optional
-from datetime import datetime
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from PIL import Image
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
 
-# Config via environment (set by systemd unit)
-MOUNT = Path(os.getenv("MEWC_MOUNT", "/mnt/mewc-volume")).resolve()
-ALLOWED = set(os.getenv("MEWC_ALLOWED_EXTS", "jpg,jpeg,png").split(","))
-MAX_MB = int(os.getenv("MEWC_MAX_UPLOAD_MB", "20480"))  # per request
-DATA_ROOT = Path("/mnt/mewc-volume")
+from . import storage as store
 
-app = FastAPI(title="MEWC Upload POC")
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
-templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+MAX_BYTES = int(os.getenv('MEWC_MAX_UPLOAD_MB', '512')) * 1024**2
+EXPANDED = int(os.getenv('MEWC_MAX_EXPANDED_MB', '2048')) * 1024**2
+MAX_FILES = int(os.getenv('MEWC_MAX_FILES', '10000'))
+DIRECT_FILES = 100
+RESERVE = int(os.getenv('MEWC_RESERVE_MB', '2048')) * 1024**2
+Image.MAX_IMAGE_PIXELS = 40_000_000
+app = FastAPI(title='MEWC private detector')
+app.mount('/static', StaticFiles(directory=Path(__file__).parent / 'static'), name='static')
+templates = Jinja2Templates(directory=str(Path(__file__).parent / 'templates'))
 
-def job_dir(job_id: str) -> Path:
-    return DATA_ROOT / "jobs" / job_id
 
-def job_dirs(job_id: str):
-    base = MOUNT / "jobs" / job_id
-    uploads = base / "uploads"
-    detect = base / "detect"
-    logs = base / "logs"
-    for p in (base, uploads, detect, logs):
-        p.mkdir(parents=True, exist_ok=True)
-    return base, uploads, detect, logs
+class BodyLimit(Exception):
+    pass
 
-def validate_name(name: str) -> Path:
-    p = Path(name)
-    if ".." in p.parts:
-        raise ValueError("invalid path")
-    return p
 
-def ok_ext(name: str) -> bool:
-    return Path(name).suffix.lower().lstrip(".") in ALLOWED
+class UploadBoundary:
+    """Bound bytes before multipart parsing, including requests without Content-Length."""
+    def __init__(self, application):
+        self.app = application
 
-def state_path(job_id: str) -> Path:
-    return MOUNT / "jobs" / job_id / "state.json"
-
-# --- helpers for md.json and safe file serving ---
-
-def find_md(job_id: str) -> Optional[Path]:
-    """Return canonical detect/md.json; if found elsewhere, copy it there."""
-    d = job_dir(job_id)
-    candidates = [
-        d / "detect" / "md.json",
-        d / "uploads" / "md.json",
-        d / "uploads" / "images" / "md.json",
-    ]
-    for p in candidates:
-        if p.exists():
-            canon = d / "detect" / "md.json"
-            canon.parent.mkdir(parents=True, exist_ok=True)
-            if p != canon:
-                try:
-                    canon.write_bytes(p.read_bytes())
-                except Exception:
-                    pass
-            return canon
-    return None
-
-def safe_upload_path(job_id: str, rel: str) -> Optional[Path]:
-    """Resolve a path under the job's uploads dir without traversal."""
-    base = job_dir(job_id) / "uploads"
-    try:
-        p = (base / rel).resolve()
-        base_r = base.resolve()
-    except Exception:
-        return None
-    if str(p).startswith(str(base_r)) and p.exists():
-        return p
-    return None
-
-# --- routes ---
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "max_mb": MAX_MB})
-
-@app.post("/jobs")
-async def create_job(
-    request: Request,
-    files: Optional[List[UploadFile]] = File(default=None),
-    zipfile_upload: Optional[UploadFile] = File(default=None),
-):
-    job_id = uuid.uuid4().hex[:12]
-    base, uploads, _, _ = job_dirs(job_id)
-
-    has_files = bool(files) and any(getattr(f, "filename", "") for f in files)
-    has_zip = bool(zipfile_upload) and bool(getattr(zipfile_upload, "filename", ""))
-
-    if not has_files and not has_zip:
-        shutil.rmtree(base, ignore_errors=True)
-        return RedirectResponse("/", status_code=303)
-
-    total = 0
-    if has_zip:
-        zpath = uploads / "upload.zip"
-        with zpath.open("wb") as f:
-            while True:
-                chunk = await zipfile_upload.read(1024 * 1024)
-                if not chunk: break
-                f.write(chunk)
-                total += len(chunk)
-                if total > MAX_MB * 1024 * 1024:
-                    f.close()
-                    zpath.unlink(missing_ok=True)
-                    shutil.rmtree(base, ignore_errors=True)
-                    return HTMLResponse(f"ZIP too large (> {MAX_MB} MB).", status_code=400)
-        if not zipfile.is_zipfile(zpath):
-            zpath.unlink(missing_ok=True)
-            shutil.rmtree(base, ignore_errors=True)
-            return HTMLResponse("Provided file is not a valid ZIP.", status_code=400)
-        with zipfile.ZipFile(zpath, "r") as z:
-            for info in z.infolist():
-                if info.is_dir(): continue
-                if not ok_ext(info.filename): continue
-                dest = uploads / validate_name(info.filename)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                with z.open(info) as src, dest.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-        zpath.unlink(missing_ok=True)
-
-    if has_files:
-        for uf in files:
-            if not getattr(uf, "filename", ""): continue
-            rel = validate_name(uf.filename)
-            if not ok_ext(rel.name): continue
-            dest = uploads / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with dest.open("wb") as f:
-                while True:
-                    chunk = await uf.read(1024 * 1024)
-                    if not chunk: break
-                    f.write(chunk)
-
-    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
-
-@app.get("/jobs/{job_id}", response_class=HTMLResponse)
-async def job_view(request: Request, job_id: str):
-    base, uploads, detect, logs = job_dirs(job_id)
-    count = len([p for p in uploads.rglob("*") if p.is_file() and ok_ext(p.name)])
-    st = {}
-    sp = state_path(job_id)
-    if sp.exists():
-        try: st = json.loads(sp.read_text())
-        except: st = {}
-    md = bool(find_md(job_id))
-    csvf = (detect/"detections.csv").exists()
-    return templates.TemplateResponse(
-        "job.html",
-        {"request": request, "job_id": job_id, "count": count, "state": st, "has_md": md, "has_csv": csvf},
-    )
-
-@app.post("/jobs/{job_id}/start")
-async def start_job(job_id: str):
-    base, uploads, _, _ = job_dirs(job_id)
-    if not uploads.exists() or not any(uploads.rglob("*")):
-        return JSONResponse({"ok": False, "error": "No uploads found"}, status_code=400)
-
-    r = subprocess.run(
-        ["sudo","/bin/systemctl","start",f"mewc-job@{job_id}.service"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
-    if r.returncode != 0:
-        return JSONResponse({"ok": False, "error": r.stderr.strip()}, status_code=500)
-    return JSONResponse({"ok": True})
-
-@app.get("/jobs/{job_id}/status")
-async def status(job_id: str):
-    sp = state_path(job_id)
-    st = {}
-    if sp.exists():
-        try: st = json.loads(sp.read_text())
-        except: st = {"status":"unknown"}
-    # include small log tail
-    log = ""
-    lp = MOUNT/"jobs"/job_id/"logs"/"detect.log"
-    if lp.exists():
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            return await self.app(scope, receive, send)
+        headers = dict(scope.get('headers', []))
+        host = headers.get(b'host', b'').decode('latin-1')
+        if urlsplit('http://' + host).hostname not in ('localhost', '127.0.0.1', '::1'):
+            return await JSONResponse({'detail': 'Use the localhost SSH tunnel'}, 400)(scope, receive, send)
+        if scope['method'] != 'POST':
+            return await self.app(scope, receive, send)
+        lock = None
         try:
-            with lp.open("rb") as f:
-                f.seek(0, os.SEEK_END)
-                size = f.tell()
-                f.seek(max(0, size - 16_384), os.SEEK_SET)
-                log = f.read().decode(errors="ignore")
-        except: pass
-    st["log_tail"] = log[-4000:]
-    return JSONResponse(st)
+            store.mounted()
+            # Prevent drive-by submissions to a localhost SSH tunnel from web pages.
+            origin = headers.get(b'origin')
+            if headers.get(b'sec-fetch-site') == b'cross-site' or (origin and urlsplit(origin.decode('latin-1')).netloc != host):
+                return await JSONResponse({'detail': 'Cross-site request rejected'}, 403)(scope, receive, send)
+            if scope['path'] == '/jobs':
+                lock = (store.ROOT / 'tmp' / 'upload.lock').open('a')
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return await JSONResponse({'detail': 'Another upload is active'}, 409)(scope, receive, send)
+                if shutil.disk_usage(store.ROOT).free < RESERVE + 2 * MAX_BYTES + EXPANDED:
+                    return await JSONResponse({'detail': 'Insufficient research-volume space'}, 507)(scope, receive, send)
+            total = 0
+            async def bounded_receive():
+                nonlocal total
+                message = await receive()
+                total += len(message.get('body', b''))
+                if total > MAX_BYTES:
+                    raise BodyLimit()
+                return message
+            await self.app(scope, bounded_receive, send)
+        except BodyLimit:
+            await JSONResponse({'detail': 'Request exceeds upload limit'}, 413)(scope, receive, send)
+        except ValueError as exc:
+            await JSONResponse({'detail': str(exc)}, 503)(scope, receive, send)
+        finally:
+            if lock:
+                lock.close()
 
-@app.get("/jobs/{job_id}/download/{name}")
-async def download(job_id: str, name: str):
-    allowed = {"md.json":"detect/md.json", "detections.csv":"detect/detections.csv"}
-    rel = allowed.get(name)
-    if not rel:
-        return HTMLResponse("Not found", status_code=404)
-    p = MOUNT/"jobs"/job_id/rel
-    if not p.exists():
-        return HTMLResponse("Not ready", status_code=404)
-    return FileResponse(str(p), filename=name)
 
-# --- CSV + summary (robust to md.json location) ---
+app.add_middleware(UploadBoundary)
 
-@app.get("/jobs/{job_id}/files/detections.csv")
-def download_csv(job_id: str):
-    ddir = job_dir(job_id) / "detect"
-    csv_path = ddir / "detections.csv"
-    if csv_path.exists():
-        return FileResponse(csv_path, filename="detections.csv", media_type="text/csv")
-    md_path = find_md(job_id)
-    if not md_path:
-        return JSONResponse({"error":"No outputs yet"}, status_code=404)
-    tmp_csv = ddir / "_tmp_detections.csv"
-    data = json.loads(md_path.read_text())
-    cats = data.get("detection_categories", {})
-    with tmp_csv.open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["file","category","category_name","conf","bbox_x","bbox_y","bbox_w","bbox_h"])
-        for im in data.get("images", []):
-            for d in im.get("detections", []):
-                cat = str(d.get("category",""))
-                name = cats.get(cat, cat)
-                bbox = d.get("bbox",[None,None,None,None])
-                w.writerow([im.get("file",""), cat, name, d.get("conf",""), *bbox])
-    return FileResponse(tmp_csv, filename="detections.csv", media_type="text/csv")
 
-@app.get("/jobs/{job_id}/summary")
-def job_summary(job_id: str):
-    ddir = job_dir(job_id) / "detect"
-    csv_path = ddir / "detections.csv"
-    counts, total = {}, 0
-    if csv_path.exists():
-        with csv_path.open() as f:
-            for row in csv.DictReader(f):
-                name = (row.get("category_name") or row.get("category") or "unknown").strip()
-                counts[name] = counts.get(name, 0) + 1; total += 1
-    else:
-        md_path = find_md(job_id)
-        if not md_path:
-            return JSONResponse({"status":"pending","total":0,"counts":[]}, status_code=202)
-        data = json.loads(md_path.read_text()); cats = data.get("detection_categories", {})
-        for im in data.get("images", []):
-            for d in im.get("detections", []):
-                name = cats.get(str(d.get("category","")), "unknown")
-                counts[name] = counts.get(name, 0) + 1; total += 1
-    items = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
-    return {"status":"ok","total": total, "counts": items}
+@app.exception_handler(ValueError)
+async def invalid(request, exc):
+    return JSONResponse({'detail': str(exc)}, status_code=400)
 
-# --- raw file serving + detections paging for bbox gallery ---
 
-@app.get("/jobs/{job_id}/files/raw/{relpath:path}")
-def get_raw(job_id: str, relpath: str):
-    p = safe_upload_path(job_id, relpath)
-    if not p:
-        return JSONResponse({"error":"not found"}, status_code=404)
-    return FileResponse(p)
+def get_state(jid):
+    store.mounted()
+    try:
+        state = store.state(jid)
+        if (store.ROOT / 'requests' / jid).exists() and state['status'] not in ('running', 'cleanup_pending'):
+            state['status'] = 'queued'
+        return state
+    except ValueError:
+        raise HTTPException(404, 'Job not found')
 
-@app.get("/jobs/{job_id}/detections")
-def list_detections(job_id: str, offset: int = 0, limit: int = 12, min_conf: float = 0.0):
-    md = find_md(job_id)
-    if not md:
-        return JSONResponse({"items": [], "total": 0}, status_code=202)
-    data = json.loads(md.read_text())
-    cats = data.get("detection_categories", {})
-    items = []
-    for im in data.get("images", []):
-        file_rel = im.get("file", "")
-        if not file_rel:
+
+def image_check(path):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', Image.DecompressionBombWarning)
+        with Image.open(path) as image:
+            if image.format not in ('JPEG', 'PNG') or image.width * image.height > Image.MAX_IMAGE_PIXELS:
+                raise ValueError('Unsupported or excessively large image')
+            image.verify()
+
+
+def stage(form, base):
+    uploads = base / 'uploads'
+    uploads.mkdir()
+    total, names = 0, set()
+    def save(name, source):
+        nonlocal total
+        rel = store.relative(name)
+        if rel.suffix.lower() not in store.ALLOWED:
+            raise ValueError('Only JPEG and PNG images are accepted')
+        key = str(rel).casefold()
+        if key in names or len(names) >= MAX_FILES:
+            raise ValueError('Duplicate filename or image-count limit exceeded')
+        names.add(key)
+        dest = uploads / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open('xb') as output:
+            while chunk := source.read(1024 * 1024):
+                total += len(chunk)
+                if total > EXPANDED or shutil.disk_usage(store.ROOT).free < RESERVE:
+                    raise ValueError('Expanded image bytes exceed storage limit')
+                output.write(chunk)
+        image_check(dest)
+    for field, upload in form.multi_items():
+        if not isinstance(upload, UploadFile) or not upload.filename:
             continue
-        dets = []
-        for d in im.get("detections", []):
-            try:
-                conf = float(d.get("conf", 0))
-            except Exception:
-                conf = 0.0
-            if conf < min_conf:
-                continue
-            dets.append({
-                "bbox": d.get("bbox", [0,0,0,0]),
-                "conf": conf,
-                "category": str(d.get("category","")),
-                "name": cats.get(str(d.get("category","")), "")
-            })
-        if dets:
-            items.append({"file": file_rel, "detections": dets})
-    total = len(items)
-    return {"items": items[offset:offset+limit], "total": total}
+        if field == 'files':
+            save(upload.filename, upload.file)
+        elif field == 'zipfile_upload':
+            with zipfile.ZipFile(upload.file) as archive:
+                if len(archive.infolist()) > MAX_FILES:
+                    raise ValueError('ZIP member-count limit exceeded')
+                for member in archive.infolist():
+                    store.relative(member.filename.rstrip('/') if member.is_dir() else member.filename)
+                    mode = member.external_attr >> 16
+                    if stat.S_ISLNK(mode) or (stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR)):
+                        raise ValueError('ZIP special files are forbidden')
+                    if member.is_dir():
+                        continue
+                    with archive.open(member) as stream:
+                        save(member.filename, stream)
+        else:
+            raise ValueError('Unknown upload field')
+    if not names:
+        raise ValueError('Select images or a ZIP archive')
+    manifest = sorted(str(p.relative_to(uploads)) for p in uploads.rglob('*') if p.is_file())
+    store.atomic_json(base / 'manifest.json', {'files': manifest})
+
+
+@app.get('/', response_class=HTMLResponse)
+def index(request: Request):
+    return templates.TemplateResponse(request=request, name='index.html', context={'max_mb': MAX_BYTES // 1024**2, 'expanded_mb': EXPANDED // 1024**2, 'max_files': MAX_FILES})
+
+
+@app.post('/jobs')
+async def create_job(request: Request):
+    jid = uuid.uuid4().hex
+    base = store.ROOT / 'inbox' / jid
+    base.mkdir(mode=0o750)
+    try:
+        async with request.form(max_files=DIRECT_FILES + 1, max_fields=0, max_part_size=1024) as form:
+            await run_in_threadpool(stage, form, base)
+    except BaseException as exc:
+        shutil.rmtree(base)
+        if isinstance(exc, (ValueError, zipfile.BadZipFile, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning)):
+            raise HTTPException(400, 'Upload rejected: invalid images, unsafe archive, duplicate names, or storage limit') from exc
+        raise
+    return RedirectResponse(f'/jobs/{jid}', 303)
+
+
+@app.get('/jobs/{jid}', response_class=HTMLResponse)
+def job_view(request: Request, jid: str):
+    state = get_state(jid)
+    return templates.TemplateResponse(request=request, name='job.html', context={'job_id': jid, 'state': state, 'count': state.get('total', 0), 'has_md': state['status'] in ('succeeded', 'partial'), 'has_csv': state['status'] in ('succeeded', 'partial')})
+
+
+@app.post('/jobs/{jid}/start')
+def start_job(jid: str):
+    state = get_state(jid)
+    if state['status'] not in ('uploaded', 'failed', 'cancelled', 'partial', 'succeeded'):
+        raise HTTPException(409, 'Job already active')
+    try:
+        (store.ROOT / 'requests' / jid).touch(exist_ok=False)
+    except FileExistsError:
+        raise HTTPException(409, 'Job already queued')
+    return {'ok': True}
+
+
+@app.post('/jobs/{jid}/cancel')
+def cancel_job(jid: str):
+    state = get_state(jid)
+    if state['status'] != 'running' and not (store.ROOT / 'requests' / jid).exists():
+        raise HTTPException(409, 'No active job to cancel')
+    (store.ROOT / 'cancel' / jid).touch(exist_ok=True)
+    return {'ok': True}
+
+
+@app.get('/jobs/{jid}/status')
+def status(jid: str):
+    state = get_state(jid)
+    state['log_tail'] = state.get('error', '')
+    return state
+
+
+def result(jid):
+    state = get_state(jid)
+    if state['status'] not in ('succeeded', 'partial'):
+        raise HTTPException(409, 'Current attempt has no published result')
+    return store.ROOT / 'jobs' / jid / 'attempts' / state['attempt']
+
+
+@app.get('/jobs/{jid}/download/{name}')
+def download(jid: str, name: str):
+    if name not in ('md.json', 'detections.csv'):
+        raise HTTPException(404)
+    return FileResponse(result(jid) / name, filename=name)
+
+
+@app.get('/jobs/{jid}/files/detections.csv')
+def download_csv(jid: str):
+    return download(jid, 'detections.csv')
+
+
+@app.get('/jobs/{jid}/summary')
+def summary(jid: str):
+    data = json.loads((result(jid) / 'md.json').read_text())
+    counts = {}
+    for image in data['images']:
+        for det in image.get('detections') or []:
+            label = data['detection_categories'][str(det['category'])]
+            counts[label] = counts.get(label, 0) + 1
+    return {'status': 'ok', 'total': sum(counts.values()), 'counts': sorted(counts.items(), key=lambda x: -x[1])}
+
+
+@app.get('/jobs/{jid}/files/raw/{name:path}')
+def raw(jid: str, name: str):
+    get_state(jid)
+    base = store.ROOT / 'jobs' / jid / 'uploads'
+    # Only worker-owned immutable snapshots are served.
+    try:
+        return FileResponse(store.safe_file(base, name))
+    except ValueError:
+        raise HTTPException(404)
+
+
+@app.get('/jobs/{jid}/detections')
+def detections(jid: str, offset: int = Query(0, ge=0), limit: int = Query(12, ge=1, le=100), min_conf: float = Query(0, ge=0, le=1)):
+    data = json.loads((result(jid) / 'md.json').read_text())
+    items = []
+    for image in data['images']:
+        selected = [dict(det, name=data['detection_categories'][str(det['category'])]) for det in image.get('detections') or [] if det['conf'] >= min_conf]
+        if selected:
+            items.append({'file': image['file'], 'detections': selected})
+    return {'items': items[offset:offset + limit], 'total': len(items)}

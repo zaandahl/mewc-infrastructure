@@ -1,0 +1,37 @@
+[Unit]
+Description=MEWC trusted single detector worker
+Requires=docker.service
+RequiresMountsFor={{ mount_point }}
+BindsTo={{ web_mount_unit.stdout }}
+After={{ web_mount_unit.stdout }} docker.service
+
+[Service]
+User=mewc-worker
+Group=mewc-read
+SupplementaryGroups=docker
+WorkingDirectory={{ app_root }}
+Environment="MEWC_MOUNT={{ mount_point }}"
+Environment="MEWC_MAX_EXPANDED_MB={{ max_expanded_mb }}"
+Environment="MEWC_MAX_FILES={{ max_files }}"
+Environment="MEWC_RESERVE_MB={{ reserve_mb }}"
+Environment="DETECT_IMAGE={{ detect_image }}"
+Environment="DETECT_MODEL={{ detect_model }}"
+Environment="DETECT_CPUS={{ detect_cpus }}"
+Environment="DETECT_MEMORY={{ detect_memory }}"
+Environment="DETECT_TIMEOUT_SECONDS={{ detect_timeout_seconds }}"
+Environment="DETECT_CONFIDENCE={{ detect_confidence }}"
+Environment="DETECT_GPUS={{ detect_gpus }}"
+ExecStartPre=+/usr/bin/nsenter --mount=/proc/1/ns/mnt /usr/local/sbin/mewc-storage-check
+ExecStart={{ venv_dir }}/bin/python -m app.worker
+Restart=on-failure
+TimeoutStopSec=60
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ mount_point }}/mewc-web/jobs {{ mount_point }}/mewc-web/work {{ mount_point }}/mewc-web/requests {{ mount_point }}/mewc-web/cancel
+MemoryMax=2G
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

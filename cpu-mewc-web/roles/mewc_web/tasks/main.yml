@@ -1,109 +1,168 @@
 ---
-- name: Ensure packages
-  apt:
-    name:
-      - python3-venv
-      - unzip
-      - nginx
+- name: Require private access and pinned detector configuration
+  ansible.builtin.assert:
+    that:
+      - bind_host == '127.0.0.1'
+      - detect_image is match('^[a-zA-Z0-9._:/-]+@sha256:[a-f0-9]{64}$')
+      - detect_cpus | int > 0
+      - max_upload_mb | int > 0
+      - max_expanded_mb | int >= max_upload_mb | int
+    fail_msg: Configure an explicit detector digest; web is a private single-operator service.
+
+- name: Verify research volume identity before installing services
+  ansible.builtin.command: /usr/local/sbin/mewc-storage-check
+  changed_when: false
+
+- name: Determine escaped mount unit
+  ansible.builtin.command:
+    argv: [systemd-escape, --path, --suffix=mount, "{{ mount_point }}"]
+  register: web_mount_unit
+  changed_when: false
+
+- name: Install web packages
+  ansible.builtin.apt:
+    name: [python3-venv, nginx]
     state: present
-    update_cache: yes
+    update_cache: true
 
-- name: Ensure app directories
-  file:
+- name: Create read-only sharing group
+  ansible.builtin.group:
+    name: mewc-read
+    system: true
+
+- name: Create separate non-login service identities
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    groups: "{{ item.groups }}"
+    append: false
+  loop:
+    - {name: mewc-web, groups: mewc-read}
+    - {name: mewc-worker, groups: 'mewc-read,docker'}
+
+- name: Remove obsolete sudo and per-job execution interfaces
+  ansible.builtin.file:
     path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/sudoers.d/mewc-web
+    - /etc/systemd/system/mewc-job@.service
+
+- name: Ensure operator-owned application
+  ansible.builtin.file:
+    path: "{{ app_root }}"
     state: directory
-    owner: "{{ service_user }}"
-    group: "{{ service_user }}"
-    mode: "0755"
-  loop:
-    - "{{ app_root }}"
-    - "{{ app_root }}/app"
-    - "{{ app_root }}/app/templates"
-    - "{{ app_root }}/app/static"
+    owner: root
+    group: root
+    mode: '0755'
 
-- name: Create venv
-  command: "python3 -m venv {{ venv_dir }}"
-  args: { creates: "{{ venv_dir }}/bin/activate" }
-
-- name: Sync app files
-  copy:
-    src: files/app/
+- name: Install operator-owned source
+  ansible.builtin.copy:
+    src: app/
     dest: "{{ app_root }}/"
-    owner: "{{ service_user }}"
-    group: "{{ service_user }}"
-    mode: "0644"
-  notify: restart mewc-web
+    owner: root
+    group: root
+    mode: '0644'
+    directory_mode: '0755'
+  notify: Restart MEWC services
 
-- name: Make scripts executable
-  file:
-    path: "{{ item }}"
-    mode: "0755"
-  loop:
-    - "{{ app_root }}/bin/run_detect.sh"
+- name: Create Python environment
+  ansible.builtin.command: "python3 -m venv {{ venv_dir }}"
+  args:
+    creates: "{{ venv_dir }}/bin/python"
 
-- name: Install Python deps (from venv, after files are in place)
+- name: Install fully hashed Python dependency lock
   ansible.builtin.pip:
     requirements: "{{ app_root }}/requirements.txt"
     virtualenv: "{{ venv_dir }}"
-    virtualenv_command: "python3 -m venv"
-  notify: restart mewc-web
+    extra_args: --require-hashes
+  notify: Restart MEWC services
 
-- name: Drop systemd unit
-  template:
-    src: templates/mewc-web.service.j2
-    dest: /etc/systemd/system/mewc-web.service
-    mode: "0644"
-  notify: restart mewc-web
+- name: Create volume-backed service directories
+  ansible.builtin.file:
+    path: "{{ mount_point }}/mewc-web/{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: '', owner: root, group: mewc-read, mode: '0750'}
+    - {path: inbox, owner: mewc-web, group: mewc-read, mode: '2750'}
+    - {path: requests, owner: mewc-web, group: mewc-read, mode: '2770'}
+    - {path: cancel, owner: mewc-web, group: mewc-read, mode: '2770'}
+    - {path: tmp, owner: mewc-web, group: mewc-web, mode: '0700'}
+    - {path: jobs, owner: mewc-worker, group: mewc-read, mode: '2750'}
+    - {path: work, owner: mewc-worker, group: mewc-worker, mode: '0700'}
 
-- name: Drop job unit template
-  template:
-    src: templates/mewc-job@.service.j2
-    dest: /etc/systemd/system/mewc-job@.service
-    mode: "0644"
+- name: Create proxy temporary directory outside private job tree
+  ansible.builtin.file:
+    path: "{{ mount_point }}/mewc-nginx-tmp"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0700'
 
-- name: Allow ubuntu to manage job units (sudoers)
-  copy:
-    src: files/mewc-web.sudoers
-    dest: /etc/sudoers.d/mewc-web
-    mode: "0440"
+- name: Install service units
+  ansible.builtin.template:
+    src: "{{ item }}.service.j2"
+    dest: "/etc/systemd/system/{{ item }}.service"
     owner: root
     group: root
+    mode: '0644'
+  loop: [mewc-web, mewc-worker]
+  notify: Restart MEWC services
 
-- name: Ensure ubuntu is in docker group (no repo changes)
-  user:
-    name: "{{ service_user }}"
-    groups: docker
-    append: true
+- name: Pull immutable detector image
+  ansible.builtin.command:
+    argv: [docker, pull, "{{ detect_image }}"]
+  register: web_image_pull
+  changed_when: "'Downloaded newer image' in web_image_pull.stdout"
 
-- name: Pre-pull detector image (if specified)
-  command: "docker pull {{ detect_image }}"
-  when: detect_image | length > 0
-
-- name: Nginx site
-  template:
-    src: templates/nginx_mewc_web.conf.j2
+- name: Install private reverse proxy
+  ansible.builtin.template:
+    src: nginx_mewc_web.conf.j2
     dest: /etc/nginx/sites-available/mewc-web
-    mode: "0644"
-  notify: restart nginx
+    mode: '0644'
+  notify: Restart nginx
 
-- name: Enable site
-  file:
+- name: Enable private proxy
+  ansible.builtin.file:
     src: /etc/nginx/sites-available/mewc-web
     dest: /etc/nginx/sites-enabled/mewc-web
     state: link
-    force: true
-  notify: restart nginx
+  notify: Restart nginx
 
-- name: Disable default site
-  file:
+- name: Disable public default site
+  ansible.builtin.file:
     path: /etc/nginx/sites-enabled/default
     state: absent
-  notify: restart nginx
+  notify: Restart nginx
 
-- name: Ensure jobs dir on mounted volume
-  file:
-    path: "{{ mount_point }}/jobs"
+- name: Install nginx storage dependency
+  ansible.builtin.file:
+    path: /etc/systemd/system/nginx.service.d
     state: directory
-    owner: "{{ service_user }}"
-    group: "{{ service_user }}"
-    mode: "0775"
+    mode: '0755'
+
+- name: Require research volume for proxy temporary files
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/nginx.service.d/mewc-storage.conf
+    mode: '0644'
+    content: |
+      [Unit]
+      RequiresMountsFor={{ mount_point }}
+      BindsTo={{ web_mount_unit.stdout }}
+      After={{ web_mount_unit.stdout }}
+      [Service]
+      ExecStartPre=/usr/local/sbin/mewc-storage-check
+  notify: Restart nginx
+
+- name: Enable services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: [mewc-worker, mewc-web, nginx]
