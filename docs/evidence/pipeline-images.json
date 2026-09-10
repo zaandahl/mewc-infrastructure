@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "images": {
+    "detect": "sha256:f34e9fe5b27d107e4e604f90601a1a54a83a3281755bd3aa7770ee348b9af27a",
+    "snip": "sha256:a22773bbca546f7bef4ec709e0f1009c118add36e89c4c1867a64eca9855a726",
+    "predict": "sha256:40b4dce61473a1652e51a8b7f484df24531bc53abd7a0fbaf68e5a01e749a077",
+    "exif": "sha256:159e60ca6812e698a1a35bba7d4f1ef0b67fd20086a349bba76aa4bb8249ed67",
+    "box": "sha256:8f22f2be3d2500514ab1115e2cb92073f157256f06238e6b94653da65aad4783"
+  },
+  "builds": {
+    "detect": {
+      "repository": "https://github.com/zaandahl/mewc-detect.git",
+      "commit": "fad64f37a20a26e4bdf65907cf6f6d063eefdf69",
+      "image_id": "sha256:f34e9fe5b27d107e4e604f90601a1a54a83a3281755bd3aa7770ee348b9af27a",
+      "source_archive_sha256": "d082d2c38d36001b3355ca4efd8daf24e57d996327d88291d94dc0b4d70d6a1d",
+      "dockerfile": "# Frozen previous runtime; this release replaces its source with reviewed fixes.\nFROM zaandahl/mewc-detect:6.0.0@sha256:d7684e9878f9130c50a3a85e9d10a9ca58ba8f0b10c866aaec45473161473bbf\nWORKDIR /code\nCOPY src/ .\n\nCMD [\"python\", \"./mewc_runner.py\"]\n",
+      "parent_image_id": null
+    },
+    "flow": {
+      "repository": "https://github.com/zaandahl/mewc-flow.git",
+      "commit": "5d7b475e96a8294e74f8fffd29e45fa5ab17ba24",
+      "image_id": "sha256:69e3da3c3fbba0b5f6e14c719da8eaf500536ae67d91443b3537722ca80d3a45",
+      "source_archive_sha256": "44fb0bf993076c2c0b024fd68ddbe1f9555bcfc95a265e9fe9f25450f1ae83ff",
+      "dockerfile": "# Frozen previous runtime; this release replaces its source with reviewed fixes.\nFROM zaandahl/mewc-flow:2.0.3@sha256:602d7738b0cd1141a2292fcf549c4c69eac808c64ed5efccac3ebf04a97306f6\nWORKDIR /code\nCOPY src/ .\n",
+      "parent_image_id": null
+    },
+    "snip": {
+      "repository": "https://github.com/zaandahl/mewc-snip.git",
+      "commit": "e98dd7d53bbecca11b72bd0ff8603078175d0b3e",
+      "image_id": "sha256:a22773bbca546f7bef4ec709e0f1009c118add36e89c4c1867a64eca9855a726",
+      "source_archive_sha256": "69c4b8e9ece13bcf789db685603a155c8b3e9a88b03186661d0270513be20eea",
+      "dockerfile": "# Required: use the fixed parent built from the matching source lock.\nARG MEWC_DETECT_BASE\nFROM ${MEWC_DETECT_BASE}\nWORKDIR /code\nCOPY src/ .\nCMD [\"python\", \"./mewc_snip.py\"]\n",
+      "parent_image_id": "sha256:f34e9fe5b27d107e4e604f90601a1a54a83a3281755bd3aa7770ee348b9af27a"
+    },
+    "predict": {
+      "repository": "https://github.com/zaandahl/mewc-predict.git",
+      "commit": "274f447eb25f1f1f322a13ffdc2e189cc932e022",
+      "image_id": "sha256:40b4dce61473a1652e51a8b7f484df24531bc53abd7a0fbaf68e5a01e749a077",
+      "source_archive_sha256": "9ba60b5649a4892eaa608be79cf83c369145d3ab81e84492a06c84a085cf11e9",
+      "dockerfile": "# Required: use the fixed parent built from the matching source lock.\nARG MEWC_FLOW_BASE\nFROM ${MEWC_FLOW_BASE}\nWORKDIR /code\nCOPY src/ .\nENV KERAS_BACKEND=tensorflow\nCMD [\"python\", \"./mewc_predict.py\"]\n",
+      "parent_image_id": "sha256:69e3da3c3fbba0b5f6e14c719da8eaf500536ae67d91443b3537722ca80d3a45"
+    },
+    "exif": {
+      "repository": "https://github.com/zaandahl/mewc-exif.git",
+      "commit": "d71b6255d47eb3ccd7f325ae5eb24e43a18d9009",
+      "image_id": "sha256:159e60ca6812e698a1a35bba7d4f1ef0b67fd20086a349bba76aa4bb8249ed67",
+      "source_archive_sha256": "d708b9484645b919b794e3c02c90f3b180c1e68a861e3723b9a7601f3954654d",
+      "dockerfile": "# Required: use the fixed parent built from the matching source lock.\nARG MEWC_DETECT_BASE\nFROM ${MEWC_DETECT_BASE}\nWORKDIR /code\nCOPY requirements-runtime.txt .\nRUN python -m pip install --no-cache-dir --no-deps --require-hashes -r requirements-runtime.txt\nCOPY src/ .\nCMD [\"python\", \"./mewc_exif.py\"]\n",
+      "parent_image_id": "sha256:f34e9fe5b27d107e4e604f90601a1a54a83a3281755bd3aa7770ee348b9af27a"
+    },
+    "box": {
+      "repository": "https://github.com/zaandahl/mewc-box.git",
+      "commit": "fb54f562645df18c32649a72ada666456c87ca33",
+      "image_id": "sha256:8f22f2be3d2500514ab1115e2cb92073f157256f06238e6b94653da65aad4783",
+      "source_archive_sha256": "158f5c8b11b0c324536de0c5591d3096d9b596ad856e3e02b8bec3b40ff443d7",
+      "dockerfile": "# Required: use the fixed parent built from the matching source lock.\nARG MEWC_DETECT_BASE\nFROM ${MEWC_DETECT_BASE}\nWORKDIR /code\nCOPY src/ .\nCMD [\"python\", \"./mewc_box.py\"]\n",
+      "parent_image_id": "sha256:f34e9fe5b27d107e4e604f90601a1a54a83a3281755bd3aa7770ee348b9af27a"
+    }
+  },
+  "transport": "Local image IDs: preserve docker image save archive or publish and record OCI digests."
+}

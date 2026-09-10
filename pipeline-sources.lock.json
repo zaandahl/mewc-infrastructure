@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "detect": {
+      "repository": "https://github.com/zaandahl/mewc-detect.git",
+      "commit": "fad64f37a20a26e4bdf65907cf6f6d063eefdf69"
+    },
+    "flow": {
+      "repository": "https://github.com/zaandahl/mewc-flow.git",
+      "commit": "5d7b475e96a8294e74f8fffd29e45fa5ab17ba24"
+    },
+    "snip": {
+      "repository": "https://github.com/zaandahl/mewc-snip.git",
+      "commit": "e98dd7d53bbecca11b72bd0ff8603078175d0b3e"
+    },
+    "predict": {
+      "repository": "https://github.com/zaandahl/mewc-predict.git",
+      "commit": "274f447eb25f1f1f322a13ffdc2e189cc932e022"
+    },
+    "exif": {
+      "repository": "https://github.com/zaandahl/mewc-exif.git",
+      "commit": "d71b6255d47eb3ccd7f325ae5eb24e43a18d9009"
+    },
+    "box": {
+      "repository": "https://github.com/zaandahl/mewc-box.git",
+      "commit": "fb54f562645df18c32649a72ada666456c87ca33"
+    }
+  }
+}
