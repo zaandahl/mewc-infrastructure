@@ -6,6 +6,7 @@
 
   <div id="actions">
     <button id="startBtn">Process with MegaDetector</button>
+    <button id="cancelBtn">Cancel job</button>
   </div>
 
   <div id="status" class="card" style="margin-top:12px">
@@ -83,7 +84,7 @@ function cardFor(item) {
   img.style.width = '100%';
   img.style.display = 'block';
   img.loading = 'lazy';
-  img.src = encodeURI(`/jobs/${jobId}/files/raw/${item.file}`);
+  img.src = `/jobs/${jobId}/files/raw/${item.file.split("/").map(encodeURIComponent).join("/")}`;
 
   const canvas = document.createElement('canvas');
   canvas.style.position = 'absolute';
@@ -129,9 +130,9 @@ async function loadPage() {
 }
 
 prevBtn.onclick = () => { offset = Math.max(0, offset - limit); loadPage(); };
-nextBtn.onclick = () => { offset = Math.max(0, Math.min(total - limit, offset + limit)); loadPage(); };
+nextBtn.onclick = () => { offset = Math.min(Math.max(0, Math.ceil(total / limit) - 1) * limit, offset + limit); loadPage(); };
 
-async function poll() {
+async function pollOnce() {
   const r = await fetch(`/jobs/${jobId}/status`, { cache: 'no-store' });
   if (!r.ok) return schedule(2000);
   const s = await r.json();
@@ -143,9 +144,10 @@ async function poll() {
   }
   lg.textContent = s.log_tail || '';
 
-  if (status === 'done' || status === 'error') {
-    lk.style.display = 'block';
-    if (!galleryBootstrapped) {
+  if (['succeeded', 'partial', 'failed', 'cancelled'].includes(status)) {
+    lk.style.display = ['succeeded', 'partial'].includes(status) ? 'block' : 'none';
+    btn.disabled = false;
+    if (['succeeded', 'partial'].includes(status) && !galleryBootstrapped) {
       galleryBootstrapped = true;
       loadPage();              // one-time load after finish
     }
@@ -156,22 +158,28 @@ async function poll() {
   schedule(2000);
 }
 
+async function poll() { try { await pollOnce(); } catch (error) { st.textContent = 'Connection interrupted; retrying'; schedule(2000); } }
+
 btn.addEventListener('click', async () => {
   btn.disabled = true;
+  galleryBootstrapped = false; lastPageKey = ''; offset = 0;
+  lk.style.display = 'none'; galleryCard.style.display = 'none';
   const r = await fetch(`/jobs/${jobId}/start`, { method:'POST' });
-  if (!r.ok) { btn.disabled = false; return; }
+  if (!r.ok) { btn.disabled = false; st.textContent = (await r.json()).detail || 'Start rejected'; return; }
   poll();
 });
+
+document.getElementById('cancelBtn').onclick = async () => { await fetch(`/jobs/${jobId}/cancel`, {method: 'POST'}); poll(); };
 
 // If server rendered a status, initialize appropriately
 {% if state.status %}
   st.textContent = "{{ state.status }}";
   pg.textContent = "{{ state.processed|default(0) }} / {{ state.total|default(count) }}";
   {% if has_md or has_csv %} lk.style.display = 'block'; {% endif %}
-  {% if state.status in ['done','error'] %}
+  {% if state.status in ['succeeded','partial'] %}
     galleryBootstrapped = true;
     loadPage();
-  {% else %}
+  {% elif state.status not in ['failed','cancelled'] %}
     poll();
   {% endif %}
 {% else %}

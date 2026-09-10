@@ -3,8 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    platform: linux/amd64
     volumes:
-      - .:/app
+      - .:/app:ro
+      # Keep container and native controller paths consistent in deployment JSON.
+      - ${MEWC_OPERATOR_DIR:?Set MEWC_OPERATOR_DIR to your private operator directory}:${MEWC_OPERATOR_DIR}
     working_dir: /app
     env_file:
       - nectar.env
+    stdin_open: true
+    tty: true
+    command: ["sleep", "infinity"]

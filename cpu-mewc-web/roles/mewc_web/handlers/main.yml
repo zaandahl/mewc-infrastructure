@@ -1,10 +1,15 @@
 ---
-- name: restart nginx
-  service: { name: nginx, state: restarted, enabled: true }
-
-- name: restart mewc-web
-  systemd:
-    name: mewc-web
+- name: Restart nginx
+  ansible.builtin.systemd:
+    name: nginx
     state: restarted
     enabled: true
     daemon_reload: true
+
+- name: Restart MEWC services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  loop: [mewc-worker, mewc-web]

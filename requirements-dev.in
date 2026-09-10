@@ -1,0 +1,7 @@
+-r requirements-controller.in
+pytest==9.1.1
+ansible-lint==26.8.0
+ruff==0.16.6
+pip-audit==2.10.1
+-r cpu-mewc-web/roles/mewc_web/files/app/requirements.txt
+httpx==0.28.1

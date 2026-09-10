@@ -1,6 +1,8 @@
 ---
-- hosts: all
+- name: Install optional private detector service
+  hosts: all
   remote_user: ubuntu
   become: true
+  force_handlers: true
   roles:
     - role: mewc_web

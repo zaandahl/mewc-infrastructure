@@ -1,16 +1,31 @@
 [Unit]
-Description=MEWC Upload POC (FastAPI)
-After=network.target
+Description=MEWC private single-operator upload API
+RequiresMountsFor={{ mount_point }}
+BindsTo={{ web_mount_unit.stdout }}
+After={{ web_mount_unit.stdout }} network.target
 
 [Service]
-User={{ service_user }}
-Group={{ service_user }}
+User=mewc-web
+Group=mewc-read
+WorkingDirectory={{ app_root }}
 Environment="MEWC_MOUNT={{ mount_point }}"
 Environment="MEWC_MAX_UPLOAD_MB={{ max_upload_mb }}"
-Environment="MEWC_ALLOWED_EXTS={{ allowed_exts | join(',') }}"
-WorkingDirectory={{ app_root }}
-ExecStart={{ venv_dir }}/bin/uvicorn app.main:app --host {{ bind_host }} --port {{ bind_port }} --proxy-headers --forwarded-allow-ips='*'
+Environment="MEWC_MAX_EXPANDED_MB={{ max_expanded_mb }}"
+Environment="MEWC_MAX_FILES={{ max_files }}"
+Environment="MEWC_RESERVE_MB={{ reserve_mb }}"
+Environment="TMPDIR={{ mount_point }}/mewc-web/tmp"
+ExecStartPre=+/usr/bin/nsenter --mount=/proc/1/ns/mnt /usr/local/sbin/mewc-storage-check
+ExecStart={{ venv_dir }}/bin/uvicorn app.main:app --host 127.0.0.1 --port {{ bind_port }} --limit-concurrency 16 --no-proxy-headers
 Restart=on-failure
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+ReadWritePaths={{ mount_point }}/mewc-web/inbox {{ mount_point }}/mewc-web/requests {{ mount_point }}/mewc-web/cancel {{ mount_point }}/mewc-web/tmp
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
+MemoryMax=1G
+TasksMax=64
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+# Supported controller: CPython 3.12 on Linux amd64.
+ansible-core==2.21.4
+python-openstackclient==10.3.0
+openstacksdk==4.20.0

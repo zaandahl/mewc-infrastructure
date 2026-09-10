@@ -1,50 +1,8 @@
 ---
-- hosts: all
-  vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+- name: Refuse unsupported legacy RStudio provisioning
+  hosts: all
+  gather_facts: false
   tasks:
-    - name: Create guest researcher with power user privileges
-      user:
-        name: researcher
-        password: "$6$Kld1193/dcDW68US$4clz3UZG.qeonDv/h/LJHf1aAUA.DhAeINpvgJ11hnqFuR83CXdUWz.rL1UHnUdUStc.43nB53SNJ48y07etI/"
-        shell: /bin/bash
-        comment: "Guest researcher with regular shell"
-        home: /home/researcher
-
-    - name: Add guest to sudo group
-      user:
-        name: researcher
-        groups: sudo
-        append: yes
-
-    - name: Ensure password authentication is enabled
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^PasswordAuthentication'
-        line: 'PasswordAuthentication yes'
-        state: present
-      notify: Restart sshd
-
-    - name: Ensure challenge response authentication is enabled
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^ChallengeResponseAuthentication'
-        line: 'ChallengeResponseAuthentication yes'
-        state: present
-      notify: Restart sshd
-
-    - name: Comment out Include directive
-      ansible.builtin.replace:
-        path: /etc/ssh/sshd_config
-        regexp: '^(Include \/etc\/ssh\/sshd_config\.d\/\*\.conf)'
-        replace: '#\1'
-      notify: Restart sshd
-
-  handlers:
-    - name: Restart sshd
-      service:
-        name: ssh
-        state: restarted
-
+    - name: Require an independently reviewed RStudio migration
+      ansible.builtin.fail:
+        msg: "Legacy RStudio provisioning is unsupported; no accounts or SSH settings have been changed."

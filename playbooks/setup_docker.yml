@@ -1,133 +1,162 @@
 ---
-- hosts: all
-  become: yes
-
+- name: Configure both runtime stores on verified mounted storage
+  hosts: all
+  become: true
   vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-
+    mount_point: /mnt/mewc-volume
   tasks:
-    - name: Add 'ubuntu' user to 'docker' group
-      user:
-        name: ubuntu
-        groups: docker
-        append: yes
-
-    - name: Stop Docker service if present
-      systemd:
-        name: docker
-        state: stopped
-      failed_when: false
-
-    - name: Stop containerd service if present
-      systemd:
-        name: containerd
-        state: stopped
-      failed_when: false
-
-    - name: Check for existing Docker data directory
-      stat:
-        path: /var/lib/docker
-      register: docker_data_dir
-
-    - name: Check for Docker data directory on mounted volume
-      stat:
-        path: /mnt/mewc-volume/docker
-      register: docker_volume_dir
-
-    - name: Move Docker data directory to mounted volume
-      command: mv /var/lib/docker /mnt/mewc-volume/docker
-      when:
-        - docker_data_dir.stat.exists
-        - not docker_volume_dir.stat.exists
-
-    - name: Check for existing containerd data directory
-      stat:
-        path: /var/lib/containerd
-      register: containerd_data_dir
-
-    - name: Check for containerd data directory on mounted volume
-      stat:
-        path: /mnt/mewc-volume/containerd
-      register: containerd_volume_dir
-
-    - name: Move containerd data directory to mounted volume
-      command: mv /var/lib/containerd /mnt/mewc-volume/containerd
-      when:
-        - containerd_data_dir.stat.exists
-        - not containerd_volume_dir.stat.exists
-
-    - name: Ensure Docker data directory exists on mounted volume
-      file:
-        path: /mnt/mewc-volume/docker
-        state: directory
-        mode: "0711"
-
-    - name: Ensure containerd data directory exists on mounted volume
-      file:
-        path: /mnt/mewc-volume/containerd
-        state: directory
-        mode: "0711"
-
-    - name: Ensure Docker systemd override directory exists
-      file:
-        path: /etc/systemd/system/docker.service.d
-        state: directory
-        mode: "0755"
-
-    - name: Configure Docker data-root on mounted volume
-      copy:
-        dest: /etc/systemd/system/docker.service.d/override.conf
-        mode: "0644"
-        content: |
-          [Service]
-          ExecStart=
-          ExecStart=/usr/bin/dockerd --data-root=/mnt/mewc-volume/docker -H fd:// --containerd=/run/containerd/containerd.sock
-      register: docker_override
-
-    - name: Generate default containerd configuration
-      command: containerd config default
-      register: containerd_default_config
+    - name: Verify mounted storage
+      ansible.builtin.command: /usr/local/sbin/mewc-storage-check
       changed_when: false
 
-    - name: Write containerd configuration
-      copy:
-        dest: /etc/containerd/config.toml
-        mode: "0644"
-        content: "{{ containerd_default_config.stdout }}"
-      register: containerd_config_base
+    - name: Create runtime configuration directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /etc/docker
+        - /etc/containerd
 
-    - name: Set containerd root on mounted volume
-      lineinfile:
-        path: /etc/containerd/config.toml
-        regexp: '^\s*root\s*='
-        line: 'root = "/mnt/mewc-volume/containerd"'
-      register: containerd_root_line
+    - name: Install configuration helper
+      ansible.builtin.copy:
+        src: files/runtime_config.py
+        dest: /usr/local/sbin/mewc-runtime-config
+        owner: root
+        group: root
+        mode: '0755'
 
-    - name: Reload systemd configuration
-      systemd:
-        daemon_reload: yes
-      when: docker_override.changed
+    - name: Plan minimal configuration edits and refuse implicit migration
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/mewc-runtime-config, --mount-point, '{{ mount_point }}']
+      register: mewc_runtime_plan
+      changed_when: false
 
-    - name: Start containerd service
-      systemd:
-        name: containerd
+    - name: Inspect persistent runtime directories without changing runtime-owned permissions
+      ansible.builtin.stat:
+        path: '{{ item }}'
+      loop:
+        - '{{ mount_point }}/docker'
+        - '{{ mount_point }}/containerd'
+      register: mewc_runtime_directories
+
+    - name: Create only missing persistent runtime directories
+      ansible.builtin.file:
+        path: '{{ item.item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0711'
+      loop: '{{ mewc_runtime_directories.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+      when: not item.stat.exists
+
+    - name: Resolve the systemd mount unit
+      ansible.builtin.command:
+        argv: [systemd-escape, --path, --suffix=mount, '{{ mount_point }}']
+      register: mewc_mount_unit
+      changed_when: false
+
+    - name: Create service dependency directories
+      ansible.builtin.file:
+        path: '/etc/systemd/system/{{ item }}.d'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [docker.service, containerd.service, docker.socket]
+
+    - name: Preview runtime and socket mount dependency changes
+      ansible.builtin.template:
+        src: templates/runtime-mount.conf.j2
+        dest: '/etc/systemd/system/{{ item }}.d/mewc-storage.conf'
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [docker.service, containerd.service, docker.socket]
+      check_mode: true
+      register: mewc_runtime_units
+
+    - name: Inspect service states without activating sockets
+      ansible.builtin.service_facts:
+
+    - name: Refuse disruptive reconfiguration during active Docker work
+      when:
+        - (mewc_runtime_plan.stdout | from_json).changed or mewc_runtime_units.changed
+        - ansible_facts.services['docker.service'].state == 'running'
+      block:
+        - name: List running containers
+          ansible.builtin.command: docker ps --quiet
+          register: mewc_running_containers
+          changed_when: false
+        - name: Require idle Docker before changed configuration
+          ansible.builtin.assert:
+            that: mewc_running_containers.stdout | trim == ''
+            fail_msg: Stop active workloads explicitly before changing runtime configuration.
+
+    - name: Install the workload idle guard
+      ansible.builtin.copy:
+        src: files/runtime_idle.py
+        dest: /usr/local/sbin/mewc-runtime-idle
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Require idle containerd namespaces before runtime changes
+      ansible.builtin.command: /usr/local/sbin/mewc-runtime-idle
+      changed_when: false
+      when: (mewc_runtime_plan.stdout | from_json).changed or mewc_runtime_units.changed
+
+    - name: Bind runtimes and socket activation to verified storage
+      ansible.builtin.template:
+        src: templates/runtime-mount.conf.j2
+        dest: '/etc/systemd/system/{{ item }}.d/mewc-storage.conf'
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [docker.service, containerd.service, docker.socket]
+
+    - name: Stop socket activation before changed runtime configuration
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        state: stopped
+      loop: [docker.socket, docker.service, containerd.service]
+      when: (mewc_runtime_plan.stdout | from_json).changed or mewc_runtime_units.changed
+
+    - name: Apply validated runtime configuration preserving other settings
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/mewc-runtime-config, --mount-point, '{{ mount_point }}', --apply]
+      # This transaction must apply while services are stopped, before validation/start.
+      when: (mewc_runtime_plan.stdout | from_json).changed  # noqa: no-handler
+      changed_when: true
+
+    - name: Validate Docker configuration before starting
+      ansible.builtin.command: dockerd --validate --config-file=/etc/docker/daemon.json
+      changed_when: false
+
+    - name: Reload changed systemd dependencies
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: (mewc_runtime_plan.stdout | from_json).changed or mewc_runtime_units.changed
+
+    - name: Enable and start the verified runtime services
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
         state: started
-        enabled: yes
+      loop: [containerd.service, docker.socket, docker.service]
 
-    - name: Start Docker service
-      systemd:
-        name: docker
-        state: started
-        enabled: yes
+    - name: Verify Docker's effective storage path
+      ansible.builtin.command:
+        argv: [docker, info, --format, '{{ "{{.DockerRootDir}}" }}']
+      register: mewc_docker_root
+      changed_when: false
+      failed_when: mewc_docker_root.stdout | trim != mount_point + '/docker'
 
-    - name: Install necessary Python packages for Docker module
-      apt:
-        name:
-          - python3-pip
-        state: present
-
-    - name: Install Docker SDK for Python
-      pip:
-        name: docker
-        state: present
+    - name: Verify containerd's effective configuration as structured TOML
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/mewc-runtime-config, --mount-point, '{{ mount_point }}', --verify]
+      changed_when: false
