@@ -1,132 +1,166 @@
-<img src="mewc_logo_hex.png" alt="MEWC Hex Sticker" width="200" align="right"/>
+<img src="mewc_logo_hex.png" alt="MEWC Hex Sticker" width="160" align="right"/>
 
-# mewc-infrastructure
+# MEWC infrastructure
 
-This repository guides ecologists through setting up a GPU instance in ARDC Nectar Cloud using Terraform within a Docker container, an example of "infrastructure as code" (IAC).
+Create a private Nectar compute instance with Terraform and configure it with
+Ansible. Research data lives on an explicitly selected, independently retained
+Cinder volume. The optional web interface runs **detection only** through an SSH
+tunnel; detector categories are not species identifications.
 
-## Quick Start
+This revised path targets **new Ubuntu 24.04 x86-64 instances**. Existing
+installations require the [migration review](docs/migration.md) before changes.
+The old Terraform roots are deliberately disabled.
 
-### 1. **Clone the Repository**
-```bash
-git clone https://github.com/zaandahl/mewc-infrastructure.git
-cd mewc-infrastructure
+| Profile | Scope |
+| --- | --- |
+| `cpu` | Verified volume and Docker/containerd host. |
+| `gpu` | Same host plus NVIDIA runtime integration using an existing working image driver and an explicit active Nectar reservation. |
+| `cpu-web` | CPU host plus private, single-operator detector upload, execution and downloads. |
+| RStudio / public web / full five-stage MEWC pipeline | Outside this change's supported scope. |
+
+See [validation evidence and limits](docs/validation.md),
+[review responses](docs/audit-response.md), and [dependency policy](docs/toolchain.md).
+
+## Start a new deployment
+
+You need a Nectar project, an existing data volume in the intended storage zone,
+a compatible image, network, flavor and an SSH keypair. For GPU use, select the
+exact active lease, reservation and reserved flavor in Nectar; do not select the
+first available flavor. GPU placement is normally left to the reservation
+scheduler (`availability_zone: null`). Storage placement remains explicit.
+
+1. Clone this repository and create an operator directory outside it:
+
+   ```sh
+   export MEWC_OPERATOR_DIR="$HOME/.local/share/mewc-operator"
+   install -d -m 700 "$MEWC_OPERATOR_DIR"
+   cp nectar.env.example nectar.env
+   chmod 600 nectar.env
+   # On the host, generate a new key only if this path is unused:
+   test ! -e "$MEWC_OPERATOR_DIR/ssh-key" && \
+     test ! -e "$MEWC_OPERATOR_DIR/ssh-key.pub" && \
+     ssh-keygen -t ed25519 -f "$MEWC_OPERATOR_DIR/ssh-key" -N ''
+   touch "$MEWC_OPERATOR_DIR/known_hosts"
+   chmod 600 "$MEWC_OPERATOR_DIR/known_hosts"
+   ```
+
+   Fill `nectar.env` with your Nectar OpenStack credentials, using the HTTPS
+   endpoint supplied by Nectar. Keep credentials out of deployment JSON, Git,
+   logs and shared plans. Generate the key on the host so your host account can
+   use it for the browser tunnel; alternatively use an existing operator-owned
+   keypair and keep its public key beside it. Do not overwrite an existing key.
+   See the official
+   [OpenStack credentials tutorial](https://tutorials.rc.nectar.org.au/openstack-cli/04-credentials).
+
+2. Build and enter the Linux amd64 controller:
+
+   ```sh
+   docker compose build
+   docker compose run --rm mewc_infra_setup bash
+   ```
+
+   Inside the container, use the same absolute operator directory path. The
+   checkout is mounted read-only; state and keys are written only in the operator
+   directory. The container runs as root: newly created state files are accessed
+   through the controller container. Register/check the host-generated keypair:
+
+   ```sh
+   ./create_keypair.sh YOUR_KEYPAIR /absolute/operator/path/ssh-key
+   ```
+
+3. Copy [the CPU example](docs/examples/cpu.json) or
+   [the GPU example](docs/examples/gpu.json) into the operator directory. Replace
+   **every example identifier and path**. Use a unique `deployment_id` and a
+   `state_dir` whose final component is that same name. Restrict `ssh_cidr` to
+   your actual operator egress address/range. The complete configuration is frozen
+   when first used; changing it requires a reviewed migration or a new deployment.
+
+   `volume_id` must name an existing, available volume belonging to this project
+   in `volume_availability_zone`. The controller never creates or owns that
+   volume. For a **new blank volume only**, add `format_volume_id` with the exact
+   same UUID to authorise initial formatting. Omit it when retaining a filesystem.
+   Never substitute `/dev/vdb` for volume identity.
+
+4. Validate selection, save a plan, review its resources, then apply:
+
+   ```sh
+   python -m mewc_infra preflight --config /absolute/operator/path/deployment.json
+   python -m mewc_infra plan --config /absolute/operator/path/deployment.json
+   python -m mewc_infra apply --config /absolute/operator/path/deployment.json
+   ```
+
+   A new plan creates one instance, its SSH security group/rule and an attachment
+   to the selected volume. It must not create or delete a data volume. Errors stop
+   execution and retain resources for diagnosis. Plans are private artifacts;
+   applying requires the saved plan and unchanged configuration/Terraform source.
+
+5. In a separate **host terminal**, obtain the instance IP from Nectar. Verify
+   its SSH host key using the authenticated cloud console or another trusted
+   channel, and add the verified key to the host-owned `known_hosts_file`.
+   `ssh-keyscan` alone is not verification. Back in the controller container, run:
+
+   ```sh
+   python -m mewc_infra configure --config /absolute/operator/path/deployment.json
+   ```
+
+   This waits a bounded time for verified SSH and cloud-init, checks the exact
+   cloud attachment, mounts by filesystem UUID, and configures runtime storage.
+   A successful configure prints `Host configuration completed.` Repeating the
+   command should converge without disrupting unchanged runtime configuration.
+   Host details and recovery rules are in [playbooks/README.md](playbooks/README.md).
+
+## Private detector interface
+
+Select `cpu-web` and supply an immutable `detector_image` reference in the JSON.
+The tested image digest and worker limits are documented in the
+[web role guide](cpu-mewc-web/roles/mewc_web/README.md). For GPU detection, configure
+profile `gpu`, then apply that role with `detect_gpus: "all"` and the same verified
+inventory, storage identity and pinned detector. GPU web deployment is an explicit
+operator composition, not a fourth controller profile.
+
+Leave the controller container (`exit`) and run this command **on your host**.
+The browser and SSH tunnel must run on the same machine; a tunnel inside the
+controller container is not reachable through the host's localhost.
+
+```sh
+ssh -i /absolute/operator/path/ssh-key \
+  -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile=/absolute/operator/path/known_hosts \
+  -L 8080:127.0.0.1:8080 ubuntu@INSTANCE_IP
 ```
 
-### 2. **Set Up the Nectar Environment File**
-Before using the Docker container, you must configure your Nectar credentials. Copy the provided `nectar.env.example` file to `nectar.env`, and fill in your details. You can find more information on how to get your Nectar credentials in the section [Setting up OpenStack Credentials](https://github.com/zaandahl/mewc-infrastructure/blob/main/README.md#setting-up-openstack-credentials).
+Open `http://localhost:8080`. Upload JPEG/PNG files or a ZIP, start the job, and
+inspect its processed/failed counts before downloading results. Each retry has a
+fresh attempt and provenance. An empty detection list is valid; missing/failed
+images are not silently counted as processed. Archive completed jobs before the
+volume fills; there is no automatic retention deletion.
 
-```
-cp nectar.env.example nectar.env
-```
+## Retain data and stop compute
 
-### 3. **Build and Launch Docker Container**
-```bash
-docker-compose build
-docker-compose up -d
-docker-compose exec mewc_infra_setup bash
-```
+Re-enter the controller with `docker compose run --rm mewc_infra_setup bash`
+from the checkout on your host, then run:
 
-### 4. **Set Up a Key Pair**
-Run the provided script within the Docker bash shell to generate and register a key pair with OpenStack. This key pair will be used to securely access your instances. This command will create a key pair located in the local repository you cloned under `./mewc-infrastructure/keys`. You will need to reference this key location to connect to GPU instances you create.
-
-```
-./create_keypair.sh
+```sh
+python -m mewc_infra destroy-plan --config /absolute/operator/path/deployment.json
+# Review the saved compute-only teardown plan.
+python -m mewc_infra destroy --config /absolute/operator/path/deployment.json
 ```
 
-### 5. **Reserve a GPU Instance on ARDC Nectar**
-Follow the steps in the [Reserving a GPU Instance on ARDC Nectar](https://github.com/zaandahl/mewc-infrastructure/blob/main/README.md#reserving-a-gpu-instance-on-ardc-nectar) section to ensure your analysis can leverage the power of GPU computing.
+The Cinder data volume remains available after compute teardown. Keep the private
+state/configuration and an independently verified export. Deleting a volume is a
+separate operator action after a retention/recovery decision; this controller has
+no permanent-data-deletion command. For recovery, including retained-volume
+reattachment and missing mounts, see [migration.md](docs/migration.md).
 
-### 6. **Run Terraform to Create the GPU Instance using `run_terraform.sh`**
-Instead of running Terraform commands manually, use the `run_terraform.sh` script to automate the process. This script initializes and applies Terraform configurations and uses Ansible to set up the GPU machine for use with MEWC.
-```bash
-cd gpu
-./run_terraform.sh apply
+## Local checks
+
+```sh
+uv venv --python 3.12
+uv pip sync --python .venv/bin/python requirements-dev.txt
+.venv/bin/ansible-galaxy collection install -r ansible-requirements.yml
+.venv/bin/python -m pytest -q
 ```
 
-### 7. **Connect to the GPU Instance**
-```bash
-ssh -i path/to/mewc-key.pem ubuntu@<your-instance-ip-address>
-```
-
-### 8. **Teardown the GPU Instance using `run_terraform.sh`**
-To dismantle your resources, use the `run_terraform.sh` script with the `destroy` command.
-```bash
-./run_terraform.sh destroy
-```
-
-## Detailed Information
-
-### Setting Up OpenStack Credentials
-
-We use environment variables to store OpenStack credentials and pass them to the Docker container. These environment variables are set in the `nectar.env` file, which is loaded when the Docker container is started.
-
-- `nectar.env` should be set up with your OpenStack credentials. It is listed in the `.gitignore` file to prevent accidental uploading of sensitive information.
-
-- The Docker Compose configuration file, `docker-compose.yaml`, specifies that the environment variables should be taken from the `nectar.env` file.
-
-- These environment variables are then accessible to any processes running inside the Docker container, including the OpenStack and Terraform commands.
-
-- They are used by the OpenStack CLI to authenticate with the OpenStack API, and by Terraform to authenticate with the OpenStack provider.
-
-Before you can use the OpenStack client with Terraform, you'll need to set up your OpenStack credentials. These credentials are different from the login you use for the Nectar Dashboard.
-
-Follow these steps to setup your OpenStack credentials:
-
-- Log on to the [Nectar Dashboard](https://dashboard.rc.nectar.org.au) and ensure you're working in the right project (Use the project selector on the top left-hand side).
-
-- Click your email address from the top right corner and click `OpenStack RC File` to download the authentication file.
-
-- Save the authentication file to your computer. This file contains all the settings required for authentication, except for your password.
-
-- Click `Settings` in the same drop-down menu to get to the `Settings` page. Then click `Reset Password` to generate a new OpenStack password. This password is used only when working with the CLIs and APIs. This password does not replace the password you use to log into the Dashboard.
-
-You can read more about these steps in the [Nectar Tutorial on OpenStack Credentials](https://tutorials.rc.nectar.org.au/openstack-cli/04-credentials).
-
-After you have your OpenStack credentials, create an `nectar.env` file in the root directory of this project and set your OpenStack environment variables there. It should look something like this:
-
-```env
-OS_AUTH_URL=http://your-openstack-url:5000/v3
-OS_USERNAME=your-username
-OS_PASSWORD=your-password
-# ... other variables ...
-```
-
-Replace the placeholders with your actual OpenStack credentials. 
-
-
-### Reserving a GPU Instance on ARDC Nectar
-To reserve a GPU instance, you will need to follow these steps:
-
-- Log on to the [Nectar Dashboard](https://dashboard.rc.nectar.org.au) and ensure you're working in the right project (Use the project selector on the top left-hand side).
-
-- Request GPU Service by navigating under the Compute section to the Flavors area to see the available instance types. Look for flavors that include GPUs. These are typically labeled as 'gpu' in the name.
-
-- If GPU flavors are available, you can proceed to launch an instance with the desired GPU flavor.
-
-- If GPU flavors are not listed, you may need to request access to GPU services. This can typically be done by submitting a support ticket through the Nectar Dashboard requesting the allocation of GPU resources.
-
-**Note:** GPU resources are in high demand and may not always be immediately available. If necessary, plan your reservations in advance and consider timeframes when GPUs are more likely to be available.
-
-
-
-### Additional Terraform Configurations
-
-- For setting up complex GPU instances, see the `gpu-multipleuser` folder.
-- For RStudio server instances, check the `cpu-rstudio` folder.
-
-
-### Listing Available Images and Flavors in OpenStack
-
-You can list available images and flavors using the OpenStack CLI:
-
-- To list images, use the following command:
-```
-openstack image list
-```
-
-- To list flavors, use:
-```
-openstack flavor list
-```
-
-
+Credential-free CI checks contracts, shell/Python/Ansible syntax, dependency
+advisories, the controller build and Terraform schema. Real cloud and detector
+checks are separate evidence; tests do not establish ecological accuracy.

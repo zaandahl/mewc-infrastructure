@@ -1,0 +1,19 @@
+{
+  "deployment_id": "example-cpu",
+  "state_dir": "/absolute/operator/path/example-cpu",
+  "profile": "cpu",
+  "project_id": "00000000-0000-4000-8000-000000000001",
+  "region": "Melbourne",
+  "availability_zone": "tasmania-02",
+  "volume_availability_zone": "tasmania-02",
+  "image_id": "00000000-0000-4000-8000-000000000002",
+  "flavor_id": "REPLACE_FLAVOR_ID",
+  "network_id": "00000000-0000-4000-8000-000000000003",
+  "keypair_name": "REPLACE_KEYPAIR",
+  "private_key_path": "/absolute/operator/path/ssh-key",
+  "volume_id": "00000000-0000-4000-8000-000000000004",
+  "ssh_cidr": "192.0.2.1/32",
+  "ssh_user": "ubuntu",
+  "known_hosts_file": "/absolute/operator/path/known_hosts",
+  "ssh_timeout_seconds": 300
+}
