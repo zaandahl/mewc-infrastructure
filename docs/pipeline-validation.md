@@ -1,7 +1,10 @@
 # Complete pipeline validation
 
-This follow-up tests the coordinated source graph in
-[pipeline-sources.lock.json](../pipeline-sources.lock.json). Private photographs,
+This record tests the exact source/image graph preserved in
+[evidence/pipeline-images.json](evidence/pipeline-images.json). The current
+[pipeline-sources.lock.json](../pipeline-sources.lock.json) includes subsequent
+[Copilot review fixes](copilot-review.md), verified separately with lightweight
+checks; the full GPU run has not been repeated on that newer graph. Private photographs,
 model weights, class maps and operational credentials are excluded from the PR.
 The source/image locks and aggregate results make the tested boundary explicit.
 

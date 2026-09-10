@@ -277,3 +277,24 @@ def test_storage_loss_before_stage_does_not_create_attempts(cfg):
     with pytest.raises(r.Invalid, match='storage loss'):
         pipeline.run()
     assert not (pipeline.root / 'work').exists()
+
+
+def test_validator_has_writable_temporary_directory_and_readonly_artifacts(cfg, monkeypatch):
+    pipeline = FakePipeline(cfg)
+    pipeline.root.mkdir(parents=True, exist_ok=True)
+    attempt = pipeline.root / 'attempt'
+    attempt.mkdir()
+    commands = []
+    def capture(cmd, **kwargs):
+        commands.append(cmd)
+        return r.subprocess.CompletedProcess(cmd, 0)
+    monkeypatch.setattr(r.subprocess, 'run', capture)
+    env = {'TMPDIR': '/images/.tmp'}
+    r.Pipeline.container(pipeline, 'snip', attempt, [], env, ['-c', 'import tempfile'])
+    r.Pipeline.container(pipeline, 'snip', attempt, [], env)
+    assert f'type=bind,src={attempt},dst=/images,readonly' in commands[0]
+    assert 'TMPDIR=/tmp' in commands[0] and 'TMPDIR=/images/.tmp' not in commands[0]
+    assert '/tmp:rw,nosuid,size=2g' in commands[0]
+    assert f'type=bind,src={attempt},dst=/images' in commands[1]
+    assert 'TMPDIR=/images/.tmp' in commands[1]
+    assert env == {'TMPDIR': '/images/.tmp'}

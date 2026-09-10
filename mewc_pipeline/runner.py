@@ -737,7 +737,8 @@ class Pipeline:
             )
             require("," not in str(source), "Docker mount source cannot contain commas")
             cmd += ["--mount", f"type=bind,src={source},dst={target},readonly"]
-        for key, value in sorted(env.items()):
+        effective_env = {**env, "TMPDIR": "/tmp"} if extra else env
+        for key, value in sorted(effective_env.items()):
             cmd += ["--env", f"{key}={value}"]
         if extra:
             cmd += ["--entrypoint", "python"]
