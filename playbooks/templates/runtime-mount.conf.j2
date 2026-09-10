@@ -1,0 +1,10 @@
+# Managed by MEWC. Refuse root-disk fallback, including socket activation.
+[Unit]
+RequiresMountsFor={{ mount_point }}
+BindsTo={{ mewc_mount_unit.stdout }}
+After={{ mewc_mount_unit.stdout }}
+
+{% if item != 'docker.socket' %}
+[Service]
+ExecStartPre=/usr/local/sbin/mewc-storage-check
+{% endif %}

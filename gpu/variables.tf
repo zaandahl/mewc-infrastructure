@@ -1,5 +1,1 @@
-variable "user_name" {}
-variable "tenant_name" {}
-variable "password" {}
-variable "auth_url" {}
-variable "domain_name" {}
+# Legacy root disabled. Typed inputs live in mewc_infra and infra/compute.

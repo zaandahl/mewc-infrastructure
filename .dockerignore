@@ -1,0 +1,5 @@
+# The controller build needs only these reviewed, non-secret files.
+**
+!Dockerfile
+!requirements-controller.txt
+!ansible-requirements.yml

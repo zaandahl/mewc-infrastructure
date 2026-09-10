@@ -1,31 +1,112 @@
 ---
-- hosts: all
+- name: Verify and mount the selected persistent Cinder volume
+  hosts: all
+  become: true
   vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+    mount_point: /mnt/mewc-volume
   tasks:
-    - name: Ensure the directory for mounting exists
-      file:
-        path: /mnt/mewc-volume
-        state: directory
+    - name: Require the supported host and explicit volume identity
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '24.04'
+          - mewc_volume_id is defined
+          - mount_point is match('^/mnt/[A-Za-z0-9_-]+$')
+        fail_msg: Ubuntu 24.04, explicit Cinder volume UUID and a single mount directory under /mnt are required.
 
-    - name: Check if the volume has a filesystem
-      command: file -s /dev/vdb
-      register: volume_check
+    - name: Wait for cloud-init to finish installing the base image
+      ansible.builtin.command: timeout 600 cloud-init status --wait
       changed_when: false
 
-    - name: Format the volume with ext4
-      filesystem:
-        fstype: ext4
-        dev: /dev/vdb
-      when: "'/dev/vdb: data' in volume_check.stdout"
+    - name: Install the storage identity guard
+      ansible.builtin.copy:
+        src: files/storage_guard.py
+        dest: /usr/local/sbin/mewc-storage-check
+        owner: root
+        group: root
+        mode: '0755'
 
-    - name: Mount the volume
-      mount:
-        path: /mnt/mewc-volume
-        src: /dev/vdb
+    - name: Set the read-only volume inspection command
+      ansible.builtin.set_fact:
+        mewc_inspect_argv: >-
+          {{ ['/usr/local/sbin/mewc-storage-check', '--inspect', '--volume-id', mewc_volume_id,
+              '--mount-point', mount_point]
+             + (['--expected-serial', mewc_expected_device_serial]
+                if mewc_expected_device_serial is defined else [])
+             + (['--attachment-verified'] if mewc_attachment_verified | default(false) | bool else []) }}
+
+    - name: Resolve only the selected whole disk and verify existing signatures
+      ansible.builtin.command:
+        argv: '{{ mewc_inspect_argv }}'
+      register: mewc_disk_probe
+      retries: 12
+      delay: 5
+      until: mewc_disk_probe.rc == 0
+      changed_when: false
+
+    - name: Record verified disk facts
+      ansible.builtin.set_fact:
+        mewc_disk: '{{ mewc_disk_probe.stdout | from_json }}'
+
+    - name: Require explicit formatting authority for a blank disk
+      ansible.builtin.assert:
+        that:
+          - mewc_disk.fstype == 'ext4' or mewc_format_volume | default(false) | bool
+        fail_msg: Selected volume is blank. Set mewc_format_volume=true only for this verified new volume.
+
+    - name: Initialise only the confirmed blank whole disk
+      community.general.filesystem:
         fstype: ext4
+        dev: '{{ mewc_disk.name }}'
+        force: false
+      when: not mewc_disk.fstype
+
+    - name: Refresh filesystem UUID after initialisation
+      ansible.builtin.command:
+        argv: '{{ mewc_inspect_argv }}'
+      register: mewc_formatted_disk
+      changed_when: false
+
+    - name: Record persistent filesystem identity
+      ansible.builtin.set_fact:
+        mewc_disk: '{{ mewc_formatted_disk.stdout | from_json }}'
+
+    - name: Require a usable ext4 filesystem UUID
+      ansible.builtin.assert:
+        that:
+          - mewc_disk.fstype == 'ext4'
+          - mewc_disk.uuid is string
+          - mewc_disk.uuid | length > 0
+
+    - name: Create mount point
+      ansible.builtin.file:
+        path: '{{ mount_point }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Mount by persistent filesystem UUID
+      ansible.posix.mount:
+        path: '{{ mount_point }}'
+        src: 'UUID={{ mewc_disk.uuid }}'
+        fstype: ext4
+        opts: defaults,nosuid,nodev,nofail,x-systemd.device-timeout=30
+        passno: '2'
         state: mounted
 
+    - name: Persist the nonsecret volume and filesystem identity for service checks
+      ansible.builtin.copy:
+        dest: /etc/mewc-storage.json
+        owner: root
+        group: root
+        mode: '0644'
+        content: >-
+          {{ {'volume_id': mewc_volume_id, 'filesystem_uuid': mewc_disk.uuid,
+              'mount_point': mount_point,
+              'expected_serial': mewc_expected_device_serial | default(none),
+              'attachment_verified': mewc_attachment_verified | default(false) | bool} | to_nice_json }}
 
+    - name: Verify the live mount before any runtime or workload setup
+      ansible.builtin.command: /usr/local/sbin/mewc-storage-check
+      changed_when: false

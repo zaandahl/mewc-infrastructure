@@ -1,22 +1,33 @@
 ---
-- hosts: all
-  vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+- name: Pull only explicitly selected immutable workload images
+  hosts: all
+  become: true
   tasks:
-  - name: Notify user about the next task
-    debug:
-      msg: "Pulling the Docker images will take a while, go enjoy a coffee..."
-  - name: Pull required Docker images
-    docker_image:
-      name: "{{ item }}"
-      source: pull
-    loop:
-      - zaandahl/mewc-detect:latest
-      - zaandahl/mewc-snip:latest
-      - zaandahl/mewc-box:latest
-      - zaandahl/mewc-exif:latest
-      - zaandahl/mewc-predict:latest
-      - zaandahl/mewc-train:latest
-      # Add other images as needed
+    - name: Require an explicit digest for every selected image
+      ansible.builtin.assert:
+        that:
+          - item is string
+          - item is match('^[A-Za-z0-9][A-Za-z0-9._/:@-]*@sha256:[0-9a-f]{64}$')
+        fail_msg: Every mewc_images entry must identify an image by sha256 digest.
+      loop: '{{ mewc_images | default([]) }}'
+
+    - name: Verify mounted storage before pulling workloads
+      ansible.builtin.command: /usr/local/sbin/mewc-storage-check
+      changed_when: false
+
+    - name: Inspect selected immutable images
+      ansible.builtin.command:
+        argv: [docker, image, inspect, '{{ item }}']
+      loop: '{{ mewc_images | default([]) }}'
+      register: mewc_image_checks
+      changed_when: false
+      failed_when: mewc_image_checks.rc not in [0, 1]
+
+    - name: Pull missing selected images
+      ansible.builtin.command:
+        argv: [docker, pull, '{{ item.item }}']
+      loop: '{{ mewc_image_checks.results }}'
+      loop_control:
+        label: '{{ item.item }}'
+      when: item.rc != 0
+      changed_when: true

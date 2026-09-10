@@ -1,0 +1,4 @@
+# This single existing role shares mount_point with host setup and retains its
+# documented operator/controller variable names. Avoid a naming-only API change.
+skip_list:
+  - var-naming[no-role-prefix]

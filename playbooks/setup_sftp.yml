@@ -1,52 +1,74 @@
 ---
-- hosts: all
+- name: Configure optional researcher accounts with keys and no elevated groups
+  hosts: all
+  become: true
   vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+    mount_point: /mnt/mewc-volume
   tasks:
-    - name: Create barry
-      user:
-        name: barry
-        password: "$6$H6xJ/cGxiiFzhWFj$SP21sqmEBzVBjtYtJySO5EoBdt3uxnjkwftDJV8Leq1a/L3NI30wSLfghvmVp6s/aF5dcT7NxFbBjkIucXWh9/"
-        shell: /bin/bash
-        comment: "Guest User with regular shell"
-        home: /mnt/mewc-volume/service
+    - name: Validate explicitly supplied researcher users
+      ansible.builtin.assert:
+        that:
+          - item.name is match('^[a-z][a-z0-9_-]{0,30}$')
+          - item.name not in ['root', 'ubuntu', 'mewc', 'mewc-web', 'mewc-worker']
+          - item.authorized_keys is defined
+          - item.authorized_keys is string
+          - item.authorized_keys | trim | length > 0
+        fail_msg: Supply each researcher name and SSH authorized_keys; deployment/service accounts are reserved.
+      loop: '{{ mewc_researchers | default([]) }}'
 
-    - name: Ensure directory exists for user's home
-      file:
-        path: /mnt/mewc-volume/service
+    - name: Read existing account identities before changes
+      ansible.builtin.getent:
+        database: passwd
+      when: mewc_researchers | default([]) | length > 0
+
+    - name: Refuse to repurpose existing system or unrelated accounts
+      ansible.builtin.assert:
+        that:
+          - >-
+            item.name not in ansible_facts.getent_passwd
+            or (ansible_facts.getent_passwd[item.name][1] | int >= 1000
+            and ansible_facts.getent_passwd[item.name][4] == mount_point + '/users/' + item.name)
+        fail_msg: Existing unrelated accounts require an explicit reviewed migration before managing them as researchers.
+      loop: '{{ mewc_researchers | default([]) }}'
+
+    - name: Require mounted persistent storage for researcher homes
+      ansible.builtin.command: /usr/local/sbin/mewc-storage-check
+      changed_when: false
+      when: mewc_researchers | default([]) | length > 0
+
+    - name: Create researcher home parent
+      ansible.builtin.file:
+        path: '{{ mount_point }}/users'
         state: directory
-        owner: barry
-        group: barry
+        owner: root
+        group: root
         mode: '0755'
+      when: mewc_researchers | default([]) | length > 0
 
-    - name: Ensure password authentication is enabled
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^PasswordAuthentication'
-        line: 'PasswordAuthentication yes'
+    - name: Create key-only researchers with no supplementary privileges
+      ansible.builtin.user:
+        name: '{{ item.name }}'
+        password_lock: true
+        shell: /bin/bash
+        home: '{{ mount_point }}/users/{{ item.name }}'
+        create_home: true
+        groups: ''
+        append: false
+      loop: '{{ mewc_researchers | default([]) }}'
+
+    - name: Install only the approved keys for each researcher
+      ansible.posix.authorized_key:
+        user: '{{ item.name }}'
+        key: '{{ item.authorized_keys }}'
         state: present
-      notify: Restart sshd
+        exclusive: true
+      loop: '{{ mewc_researchers | default([]) }}'
+      no_log: true
 
-    - name: Ensure challenge response authentication is enabled
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: '^ChallengeResponseAuthentication'
-        line: 'ChallengeResponseAuthentication yes'
-        state: present
-      notify: Restart sshd
-
-    - name: Comment out Include directive
-      ansible.builtin.replace:
-        path: /etc/ssh/sshd_config
-        regexp: '^(Include \/etc\/ssh\/sshd_config\.d\/\*\.conf)'
-        replace: '#\1'
-      notify: Restart sshd
-
-  handlers:
-    - name: Restart sshd
-      service:
-        name: ssh
-        state: restarted
-
+    - name: Verify researchers have no existing direct sudo entitlement
+      ansible.builtin.command:
+        argv: [sudo, -n, -l, -U, '{{ item.name }}']
+      loop: '{{ mewc_researchers | default([]) }}'
+      register: mewc_researcher_sudo
+      changed_when: false
+      failed_when: mewc_researcher_sudo.rc != 1

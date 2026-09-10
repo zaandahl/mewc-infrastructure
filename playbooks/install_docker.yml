@@ -1,42 +1,37 @@
 ---
-- hosts: all
-  vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+- name: Install Ubuntu-supported container runtimes without starting them on root storage
+  hosts: all
+  become: true
   tasks:
-    - name: Ensure old docker versions are removed
-      apt:
-        name: 
-          - docker
-          - docker-engine
-          - docker.io
-        state: absent
+    - name: Require verified mounted storage before package changes
+      ansible.builtin.command: /usr/local/sbin/mewc-storage-check
+      changed_when: false
 
-    - name: Install required system packages
-      apt:
-        name: 
-          - apt-transport-https
+    - name: Install distribution runtime and Python SDK packages
+      ansible.builtin.apt:
+        name:
+          - "docker.io{{ '=' + mewc_docker_package_version if mewc_docker_package_version is defined else '' }}"
+          - "containerd{{ '=' + mewc_containerd_package_version if mewc_containerd_package_version is defined else '' }}"
+          - python3-docker
           - ca-certificates
-          - curl
-          - software-properties-common
+          - gnupg
         state: present
+        update_cache: true
+        cache_valid_time: 3600
+        policy_rc_d: 101
+        install_recommends: false
 
-    - name: Add Docker GPG key
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
+    - name: Record actual distribution runtime versions for reproducibility
+      ansible.builtin.command:
+        argv: [dpkg-query, --show, '--showformat=${Package}=${Version}\n', docker.io, containerd, python3-docker]
+      register: mewc_host_package_versions
+      changed_when: false
 
-    - name: Add Docker APT repository
-      apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
-        state: present
-
-    - name: Update the APT package cache
-      apt:
-        update_cache: yes
-
-    - name: Install Docker
-      apt:
-        name: docker-ce
-        state: present
+    - name: Persist the installed runtime package manifest
+      ansible.builtin.copy:
+        dest: /etc/mewc-host-packages.txt
+        content: '{{ mewc_host_package_versions.stdout }}
+'
+        owner: root
+        group: root
+        mode: '0644'

@@ -1,23 +1,11 @@
 ---
-- hosts: all
-  vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-    ubuntu_release: "{{ ansible_distribution_release }}"
-  become: yes
+# Optional legacy feature, deliberately excluded from the supported site.yml.
+- name: Require a separately reviewed PowerShell installation
+  hosts: all
+  gather_facts: false
   tasks:
-    - name: Add Microsoft's GPG key
-      apt_key:
-        url: "https://packages.microsoft.com/keys/microsoft.asc"
-        state: present
-
-    - name: Add the PowerShell repository
-      apt_repository:
-        repo: "deb [arch=amd64,arm64,armhf] https://packages.microsoft.com/repos/microsoft-ubuntu-{{ ubuntu_release }}-prod {{ ubuntu_release }} main"
-        state: present
-        update_cache: yes
-
-    - name: Install PowerShell
-      apt:
-        name: powershell
-        state: present
+    - name: Explain the optional feature boundary
+      ansible.builtin.fail:
+        msg: >-
+          PowerShell is not part of the supported MEWC host setup. Install a pinned,
+          reviewed distribution-specific package separately if this legacy feature is required.

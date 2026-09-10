@@ -1,68 +1,92 @@
 ---
-- hosts: all
+- name: Integrate the preinstalled Nectar NVIDIA driver with Docker
+  hosts: all
+  become: true
   vars:
-    ansible_user: ubuntu
-    ansible_ssh_private_key_file: /app/keys/mewc-key
-  become: yes
+    mewc_nvidia_toolkit_version: 1.20.0-1
   tasks:
-  
-  - name: Update package repository
-    apt:
-      update_cache: yes
+    # No NVIDIA driver/CUDA packages: Nectar vGPU licensing belongs to the image.
+    - name: Require the image's functioning NVIDIA driver
+      ansible.builtin.command: nvidia-smi --query-gpu=driver_version,name --format=csv,noheader
+      changed_when: false
 
-  - name: Import NVIDIA GPG key
-    ansible.builtin.apt_key:
-      url: https://nvidia.github.io/libnvidia-container/gpgkey
-      state: present
-      keyring: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    - name: Verify storage before toolkit changes
+      ansible.builtin.command: /usr/local/sbin/mewc-storage-check
+      changed_when: false
 
-  - name: Add NVIDIA stable repository
-    ansible.builtin.apt_repository:
-      repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/ubuntu18.04/amd64 /"
-      state: present
-      filename: nvidia-container-toolkit
-      update_cache: yes
+    - name: Install the pinned NVIDIA repository signing key
+      ansible.builtin.get_url:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey
+        dest: /usr/share/keyrings/nvidia-container-toolkit.asc
+        checksum: sha256:c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9
+        owner: root
+        group: root
+        mode: '0644'
 
-  - name: Add NVIDIA stable deb repository
-    ansible.builtin.apt_repository:
-      repo: "deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /"
-      state: present
-      filename: nvidia-container-toolkit
-      update_cache: yes
+    - name: Configure the current signed NVIDIA production repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          deb [arch=amd64 signed-by=/usr/share/keyrings/nvidia-container-toolkit.asc] https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /
+      notify: Refresh NVIDIA package metadata
 
-  - name: Install nvidia-container-toolkit package
-    apt:
-      name: nvidia-container-toolkit-base
-      state: present
+    - name: Refresh changed repository metadata before toolkit installation
+      ansible.builtin.meta: flush_handlers
 
-  - name: Generate CDI specification for NVIDIA devices
-    command:
-      cmd: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-      creates: /etc/cdi/nvidia.yaml  # This ensures the command runs only if the file doesn't exist.
+    - name: Install the complete pinned toolkit without replacing the image driver
+      ansible.builtin.apt:
+        name:
+          - 'nvidia-container-toolkit={{ mewc_nvidia_toolkit_version }}'
+          - 'nvidia-container-toolkit-base={{ mewc_nvidia_toolkit_version }}'
+          - 'libnvidia-container-tools={{ mewc_nvidia_toolkit_version }}'
+          - 'libnvidia-container1={{ mewc_nvidia_toolkit_version }}'
+        state: present
+        policy_rc_d: 101
+        install_recommends: false
 
-  - name: Configure Docker for NVIDIA runtime
-    block:
-      - name: Install the nvidia-container-toolkit
-        apt:
-          name: nvidia-container-toolkit
-          state: present
+    - name: Read current Docker configuration
+      ansible.builtin.slurp:
+        src: /etc/docker/daemon.json
+      register: mewc_gpu_daemon
 
-      - name: Configure Docker daemon for NVIDIA runtime
-        command: nvidia-ctk runtime configure --runtime=docker
-        notify: Restart Docker
+    - name: Configure NVIDIA runtime only when missing or incorrect
+      when: >-
+        ((mewc_gpu_daemon.content | b64decode | from_json).get('runtimes', {}).get('nvidia', {}).get('path', ''))
+        not in ['nvidia-container-runtime', '/usr/bin/nvidia-container-runtime']
+      block:
+        - name: Check for active workloads before changing the GPU runtime
+          ansible.builtin.command: docker ps --quiet
+          register: mewc_gpu_running_containers
+          changed_when: false
+        - name: Require idle Docker for GPU integration
+          ansible.builtin.assert:
+            that: mewc_gpu_running_containers.stdout | trim == ''
+            fail_msg: Stop active containers explicitly before GPU runtime reconfiguration.
+        - name: Configure NVIDIA with the supported toolkit command
+          ansible.builtin.command: nvidia-ctk runtime configure --runtime=docker
+          changed_when: true
+        - name: Validate the resulting Docker configuration
+          ansible.builtin.command: dockerd --validate --config-file=/etc/docker/daemon.json
+          changed_when: false
+        - name: Restart Docker after the actual runtime configuration change
+          ansible.builtin.systemd_service:
+            name: docker.service
+            state: restarted
 
-  - name: Restart Docker service
-    service:
-      name: docker
-      state: restarted
+    - name: Verify the installed NVIDIA runtime registration
+      ansible.builtin.command:
+        argv: [docker, info, --format, '{{ "{{json .Runtimes}}" }}']
+      register: mewc_gpu_runtime_info
+      changed_when: false
+      failed_when: "'nvidia' not in (mewc_gpu_runtime_info.stdout | from_json)"
 
-  - name: Test the NVIDIA setup with Docker
-    command:
-      cmd: docker run --rm --runtime=nvidia --gpus all nvidia/cuda:11.6.2-base-ubuntu20.04 nvidia-smi
-      warn: no
+    # Actual GPU inference is a release validation, using a digest/model selected
+    # explicitly by the operator. nvidia-smi alone is not inference evidence.
 
   handlers:
-    - name: Restart Docker
-      systemd:
-        name: docker
-        state: restarted
+    - name: Refresh NVIDIA package metadata
+      ansible.builtin.apt:
+        update_cache: true

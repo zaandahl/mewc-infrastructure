@@ -1,0 +1,15 @@
+---
+# Inventory supplies ansible_user and ansible_ssh_private_key_file explicitly.
+- name: Verify persistent storage
+  ansible.builtin.import_playbook: setup_volume.yml
+- name: Install supported runtimes
+  ansible.builtin.import_playbook: install_docker.yml
+- name: Configure persistent runtime storage
+  ansible.builtin.import_playbook: setup_docker.yml
+- name: Configure optional NVIDIA integration
+  ansible.builtin.import_playbook: setup_nvidiadocker.yml
+  when: mewc_enable_gpu | default(false) | bool
+- name: Pull explicitly selected images
+  ansible.builtin.import_playbook: setup_containers.yml
+- name: Configure optional researcher accounts
+  ansible.builtin.import_playbook: setup_sftp.yml
