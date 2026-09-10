@@ -47,6 +47,16 @@ mount aliases introduced by systemd sandboxing; the storage guard now runs in th
 host mount namespace without weakening its device/UUID checks. These findings
 were repaired and are covered by the final reruns reported here.
 
+## Final automated-review follow-up
+
+The package manifest's multiline quoted scalar parsed successfully but appended a
+space; it now writes an explicit trailing newline. The instance IP output now
+selects the configured network's `fixed_ip_v4`. Both recorded live GPU instances
+had the same populated value in that field and `access_ip_v4`; the change removes
+reliance on the latter accessor. The final follow-up was checked with the locked
+provider schema, recorded applied resource data, Ansible parsing/lint and CI.
+No additional cloud resources were created for these two narrow corrections.
+
 ## Reproduction and release boundary
 
 Run the README's new-deployment sequence in a private operator directory. Preserve

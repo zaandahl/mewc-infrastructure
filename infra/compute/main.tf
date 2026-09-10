@@ -53,7 +53,7 @@ resource "openstack_compute_volume_attach_v2" "data" {
 }
 
 output "instance_ip" {
-  value = openstack_compute_instance_v2.worker.access_ip_v4
+  value = openstack_compute_instance_v2.worker.network[0].fixed_ip_v4
 }
 
 output "instance_id" {

@@ -30,8 +30,7 @@
     - name: Persist the installed runtime package manifest
       ansible.builtin.copy:
         dest: /etc/mewc-host-packages.txt
-        content: '{{ mewc_host_package_versions.stdout }}
-'
+        content: "{{ mewc_host_package_versions.stdout }}\n"
         owner: root
         group: root
         mode: '0644'
