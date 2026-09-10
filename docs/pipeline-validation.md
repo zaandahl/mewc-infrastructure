@@ -34,7 +34,8 @@ score reconciliation, filesystem replacement/loss, original modification times,
 model snapshot changes, frozen runner sources, owned-container reconciliation,
 partial export ownership and corrupted-transfer rejection.
 
-The companion suites cover typed options, detector failure propagation, original
+The six companion suites pass 199 tests in total (flow 33, detect 29, snip 14,
+predict 58, EXIF 40 and box 25). They cover typed options, detector failure propagation, original
 crop indices, output axis/original-code distinctions, exact ties, full scores,
 lossless metadata copies and shipped CLI configuration. GitHub runs the locked
 lightweight dependencies without cloud credentials. Real ML execution is separate
@@ -47,8 +48,10 @@ configured filesystem UUID before staging, execution and writes.
 
 ## Runtime checks
 
-Runtime evidence is being finalized against fresh run identities after the
-numerical execution repair below. The disposable host uses Linux amd64, an A100
+A fresh full run passed after the numerical execution repair below. The tested
+[source/image graph](evidence/pipeline-images.json) and
+[aggregate acceptance record](evidence/pipeline-validation.json) are included.
+The disposable host uses Linux amd64, an A100
 40 GB GPU, Docker/containerd on a separate retained filesystem, NVIDIA driver
 580.178.04 and toolkit 1.20.0-1. The classifier runtime remains TensorFlow 2.16.1
 and Keras 3.3.3; these inherited versions are frozen, not a general dependency
@@ -61,6 +64,18 @@ YAML configuration rather than depending on a helper or defaults inherited from
 the wrong runtime family. Their repaired CLI entry points and packaged defaults
 have regression tests. Separate runtime checks exported metadata for all 43
 images and rendered 43 boxed copies with all original hashes unchanged.
+
+The accepted run completed all five stages for 43 images and 45 crops/rows.
+A second invocation reused all five verified stages. Its 110-file export passed
+verification after transfer to the operator workstation; all 43 original input
+files retained their bytes, sizes and modification times.
+
+The final blank run was deliberately interrupted while its detector container
+was running. The runner reported failure, removed that owned container and
+preserved the failed attempt. Repeating the same run completed as `success-empty`
+with zero crops and `model_runtime_validated=false`. Its 25-file export also
+passed transfer verification. A deliberately corrupted separate export copy was
+rejected.
 
 ## Numerical execution gate
 
@@ -78,8 +93,12 @@ The repair restores one historical Keras `model.predict` call over the complete
 ordered dataset, followed by the existing shape/probability validation. All sites
 remain in that dataset, so the model is loaded once. Empty crops continue to skip
 model deserialization. SavedModel signatures retain their separate explicit
-contract. The follow-up comparison must also agree with the persisted first
-baseline, rather than only with a second call in the same process.
+contract. The follow-up comparison passed all three checks: restored execution versus
+the persisted first baseline, restored execution versus a fresh in-process
+control, and that control versus the first baseline. All 1,152 probabilities
+were bitwise identical in all three comparisons (maximum absolute difference
+zero), with identical exact-top sets and no ties. The parent independently
+checked the transferred NPZ arrays and their recorded hash. No tolerance was changed.
 
 Timing observations include initial graph tracing and are not a controlled
 performance comparison. The large model took about 456 seconds to load in the
