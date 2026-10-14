@@ -149,10 +149,10 @@ python3 -m mewc_pipeline run --config /srv/mewc/config/example-run-001.json
 | `run` | Stages if necessary, runs five stages, verifies their artifacts and reuses only completed outputs that still pass validation. |
 | `status` | Reads recorded run/stage states; it does not certify file integrity. |
 | `verify` | Rechecks completed run snapshots, stage files and cross-stage identities and writes `verification.json`. |
-| `export` | Verifies first, then creates a separate hashed export at a fresh destination. |
-| `verify-export` | Checks the transferred export inventory and hashes independently of its original run/configuration. |
+| `export` | Verifies first, then publishes the standard camera result. `--mode audit` explicitly selects the detailed bundle. |
+| `verify-export` | Checks a transferred standard result with its separate `--receipt`; audit bundles use `--mode audit`. |
 
-The integrated scientific policy is explicit: `category-confidence-v1` selects eligible detections using higher-confidence-first suppression within each detector category, with the configured numeric thresholds. Snips retain eligible animals and their original detection indices. Mixed eligible categories go to the review `mixed` folder. `DRAW=false` disables drawing and preserves copied image bytes; it does not disable the final stage or its verification.
+The integrated scientific policy is explicit: `category-confidence-v1` selects eligible detections using higher-confidence-first suppression within each detector category, with the configured numeric thresholds. Snips retain eligible animals and their original detection indices. The effective `SORT_POLICY` defaults to `highest_confidence`: an image with multiple eligible categories goes to the category of its highest-confidence detection. An exact cross-category tie is an explicit error, not an arbitrary choice. `mixed` remains an explicit option for audit workflows. Standard results require `DRAW=true` and `highest_confidence`; `DRAW=false` preserves image bytes and is available with audit export.
 
 `THRESHOLD` is the detector output floor; `LOWER_CONF` is the downstream eligibility threshold. Preserve both declared values. The detector floor may exceed `LOWER_CONF`, in which case lower-scoring detections are absent from its output. Configuration requires `LOWER_CONF <= UPPER_CONF` without imposing an ordering between `THRESHOLD` and `LOWER_CONF`.
 
@@ -168,7 +168,9 @@ python3 -m mewc_pipeline verify --config /srv/mewc/config/example-run-001.json
 python3 -m mewc_pipeline export \
   --config /srv/mewc/config/example-run-001.json \
   --destination /srv/mewc/exports/example-run-001
-python3 -m mewc_pipeline verify-export --destination /srv/mewc/exports/example-run-001
+python3 -m mewc_pipeline verify-export \
+  --destination /srv/mewc/exports/example-run-001 \
+  --receipt /srv/mewc/runs/example-run-001/exports/REPLACE_WITH_PRINTED_RECEIPT_NAME.json
 ```
 
 The run directory contains `manifest.json`, verified `inputs/` and `models/` snapshots, stage attempts under `work/`, and `logs/`. Originals and model assets are mounted read-only into isolated stage containers; derived metadata, Camelot copies and renderings go to separate stage outputs. Source paths are rebased under `originals/` without dropping their nested identity. Original detector output remains in the detection attempt alongside the rebased artifact.
@@ -177,4 +179,53 @@ After an interruption or timeout, inspect the recorded failure and log, then rep
 
 The immutable run identity includes effective configuration, source file hashes and modification times, model hashes/declaration, image IDs and runner source hashes. Changing any of these requires a new `run_id` and a fresh `run_dir`. Reusing the old directory with modified inputs, model declarations or code is rejected. Keep the existing run and evidence for comparison.
 
-Exports contain run/verification records, detection/crop/prediction manifests, prediction CSV/pickle/NPZ, canonical metadata, Camelot copies, review images and logs. They do not include the original input snapshot or model files; preserve the retained run separately when those are needed for reproduction. A failed full run cannot produce a certified export. Transfer the completed export using rsync, then run `verify-export --destination ...` on the receiving host from this checkout. That check verifies transport integrity; it is not a new scientific validation. Interrupted exports use an owned `.partial` directory and can be retried for the same run and destination.
+The ordinary export preserves the source leaf-folder hierarchy. Each camera
+leaf contains exactly these entries (a flat single-camera input uses the export
+root itself):
+
+```text
+md_out.json
+mewc_out.csv
+animal/
+blank/
+person/
+snips/
+vehicle/
+```
+
+The CSV comes from the final EXIF stage, not the earlier predictor output.
+Animal/person/vehicle images come from the final boxing stage, preserving the
+EXIF-enriched image metadata; blanks are copied without boxes. MegaDetector's
+standard renderer uses red for animals, blue for people and gold for vehicles.
+Images in each category keep their original basenames. Detector image paths
+and CSV source paths point to the category files within that camera leaf.
+Image-bearing branches mixed with image-bearing descendants are rejected;
+organize the source as image-bearing leaves before running the pipeline. Every
+leaf must contain at least one JPEG; empty leaves and case-insensitive image
+filename or directory collisions are rejected before inference.
+
+All generated animal snips are returned. Exported snips use 16 random alphanumeric
+characters plus their original extension; `rand_name` records that filename in
+the CSV of its camera leaf. The controller persists the mapping outside the result tree so an
+interrupted export reuses names. Internal crop identities, model outputs and
+stage artifacts remain unchanged. `--keep-snip-names` disables presentation
+renaming; `--snip-chars N` selects another random-name length.
+
+The external hash receipt is retained under the run's `exports/` directory and
+its path is printed by `export`. It is deliberately absent from the user's camera
+result. Transfer that receipt separately when independent receiving-host
+verification is required; pass it with `verify-export --receipt ...`. This checks
+files, hashes and directories, including empty category folders. A matching
+completed result can be checked and reused; an unrelated existing destination
+is rejected. Interrupted exports use an owned `.partial` directory.
+
+For diagnostics, `export --mode audit --destination FRESH_PATH` retains the
+previous detailed bundle: run/verification records, detection/crop/prediction
+manifests, CSV/pickle/NPZ, metadata, Camelot copies, review images and logs. Check
+that bundle with `verify-export --mode audit --destination ...`. Neither mode
+includes the original input snapshot or model files. Preserve the private run
+when reproduction is needed. A failed full run cannot produce a certified export.
+
+Changing controller code or effective options requires a fresh run identity.
+Historical runs retain their frozen controller; do not weaken source checks or
+rewrite old manifests to make a new exporter accept them.

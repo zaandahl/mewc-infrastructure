@@ -23,6 +23,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from . import results
+
 STAGES = ("detect", "snip", "predict", "exif", "box")
 POLICY = "category-confidence-v1"
 IMAGE = re.compile(r"(?:[a-zA-Z0-9._:/-]+@)?sha256:[a-f0-9]{64}\Z")
@@ -37,6 +39,7 @@ OPTIONS = dict(
     BATCH_SIZE=16,
     DRAW=True,
     TOP_CLASSES=True,
+    SORT_POLICY="highest_confidence",
 )
 ENV_COMMON = dict(
     PYTHONUNBUFFERED="1",
@@ -51,7 +54,6 @@ ENV_COMMON = dict(
     EXIF_DIR="camelot",
     OUTPUT_DIR="boxed",
     SUPPRESSION_POLICY=POLICY,
-    SORT_POLICY="mixed",
     SUBFOLDER=True,
     RENAME_SNIPS=False,
     RECURSIVE=True,
@@ -224,6 +226,8 @@ def config(path):
     opts = {**OPTIONS, **supplied}
     for key in ("DRAW", "TOP_CLASSES"):
         require(type(opts[key]) is bool, f"{key} must be a JSON boolean")
+    require(opts["SORT_POLICY"] in ("highest_confidence", "mixed"),
+            "SORT_POLICY must be highest_confidence or mixed")
     for key in ("THRESHOLD", "LOWER_CONF", "UPPER_CONF", "OVERLAP", "EDGE_DIST"):
         value = opts[key]
         require(
@@ -299,6 +303,21 @@ def image_files(source):
         all(Path(name).suffix.lower() in {".jpg", ".jpeg"} for name in files),
         "Full Camelot pipeline currently requires JPEG inputs only; stage other files separately",
     )
+    for directory, children, names in os.walk(source, followlinks=False):
+        images = [name for name in names
+                  if str((Path(directory) / name).relative_to(source)) in files]
+        if children:
+            require(not images, "Images must occur only in leaf folders: "
+                    + str(Path(directory).relative_to(source)))
+        else:
+            require(images, "Leaf folder contains no JPEG images: "
+                    + str(Path(directory).relative_to(source)))
+    names = set(files)
+    for name in files:
+        names.update(str(parent) for parent in PurePosixPath(name).parents
+                     if str(parent) != ".")
+    require(len({name.casefold() for name in names}) == len(names),
+            "Case-insensitive input filename/directory collision")
     return files
 
 
@@ -1036,7 +1055,63 @@ class Pipeline:
         atomic(self.root / "verification.json", report)
         return report
 
-    def export(self, target):
+    def export(self, target, *, mode="standard", rename_snips=True, snip_chars=16):
+        """Publish camera results by default; retain diagnostics only on request."""
+        require(mode in ("standard", "audit"), "Unknown export mode")
+        if mode == "audit":
+            return self.export_audit(target)
+
+        def export_destination(path):
+            self.storage()
+            candidate = Path(path)
+            require(candidate.is_absolute() and ".." not in candidate.parts,
+                    "Expected an absolute export path without parent traversal")
+            return absolute(str(candidate), "export destination")
+
+        target = export_destination(target)
+        for protected in (self.root, Path(self.cfg["input_dir"])):
+            require(not target.is_relative_to(protected)
+                    and not protected.is_relative_to(target),
+                    "Export must be separate from run and input trees")
+        verification = self.verify()
+        target = export_destination(target)
+        receipt_path = export_destination(self.root / "exports" / (digest({
+            "destination": str(target), "mode": mode,
+        }) + ".json"))
+        partial = target.with_name(target.name + ".partial")
+        try:
+            if target.exists():
+                require(receipt_path.is_file(),
+                        "Export directory already exists without this run's receipt")
+                receipt = read(receipt_path)
+                require(receipt.get("fingerprint") == verification["fingerprint"],
+                        "Export belongs to a different run")
+                require(receipt.get("destination") == str(partial),
+                        "Export receipt belongs to a different destination")
+                require(receipt.get("rename_snips") is rename_snips
+                        and receipt.get("snip_chars") == snip_chars,
+                        "Export naming options changed")
+                result = results.verify(target, receipt)
+            else:
+                manifest = read(self.manifest_path)
+                sources = {"originals/" + name: record
+                           for name, record in manifest["identity"]["inputs"].items()}
+                receipt = results.materialize(
+                    partial, stages=self.paths(manifest), sources=sources,
+                    fingerprint=verification["fingerprint"], receipt_path=receipt_path,
+                    guard=export_destination,
+                    rename_snips=rename_snips, snip_chars=snip_chars,
+                )
+                target = export_destination(target)
+                require(not target.exists(), "Export directory appeared before publication")
+                os.replace(export_destination(partial), target)
+                result = results.verify(target, receipt)
+        except results.Invalid as error:
+            raise Invalid(str(error)) from error
+        return {**result, "export_dir": str(target), "mode": mode,
+                "receipt": str(receipt_path)}
+
+    def export_audit(self, target):
         verification = self.verify()
         target = absolute(str(target), "export directory")
         require(
@@ -1147,10 +1222,19 @@ def main(argv=None):
     )
     parser.add_argument("--config")
     parser.add_argument("--destination")
+    parser.add_argument("--mode", choices=("standard", "audit"), default="standard",
+                        help="standard camera results (default) or detailed audit bundle")
+    parser.add_argument("--receipt", help="External receipt for verifying standard results")
+    parser.add_argument("--keep-snip-names", action="store_true")
+    parser.add_argument("--snip-chars", type=int, default=16)
     args = parser.parse_args(argv)
     try:
         if args.action == "verify-export":
             root = absolute(args.destination, "destination")
+            if args.mode == "standard":
+                require(args.receipt, "Standard result verification requires --receipt")
+                print(json.dumps(results.verify(root, read(absolute(args.receipt, "receipt")))))
+                return 0
             doc = read(root / "export_manifest.json")
             actual = inventory(root)
             actual.pop("export_manifest.json")
@@ -1211,7 +1295,9 @@ def main(argv=None):
                 result = pipeline.verify()
             else:
                 require(args.destination, "--destination is required")
-                result = pipeline.export(args.destination)
+                result = pipeline.export(args.destination, mode=args.mode,
+                                         rename_snips=not args.keep_snip_names,
+                                         snip_chars=args.snip_chars)
         print(json.dumps(result, indent=2))
         return 0
     except (
