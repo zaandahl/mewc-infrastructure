@@ -98,7 +98,7 @@ class FakePipeline(r.Pipeline):
             path.parent.mkdir(parents=True)
             path.write_bytes(b'boxed')
             r.atomic(attempt / 'boxed/box_report.json', dict(schema_version=1, complete=True, errors=[],
-                     draw=True, subfolder=True, sort_policy='highest_confidence',
+                     draw=True, subfolder=True, sort_policy='highest_confidence', suppression_policy=r.POLICY,
                      images=[dict(source_file=source, status='copied' if self.empty else 'rendered',
                                   output_file=path.relative_to(attempt).as_posix())]))
         (self.root / 'logs').mkdir(exist_ok=True)
@@ -409,4 +409,16 @@ def test_standard_export_rechecks_storage_after_verification(cfg, tmp_path, monk
     with pytest.raises(r.Invalid, match='retained storage withdrawn'):
         pipeline.export(target)
     assert not target.parent.exists()
+    assert not (pipeline.root / 'exports').exists()
+
+
+def test_standard_export_uses_configured_detection_threshold(cfg, tmp_path):
+    cfg['options']['LOWER_CONF'] = .9
+    pipeline = FakePipeline(cfg)
+    pipeline.run()
+    # The fake boxer incorrectly calls its .8-confidence detection an animal.
+    # The exporter must use this run's .9 threshold rather than its default.
+    with pytest.raises(r.Invalid, match='routing'):
+        pipeline.export(tmp_path / 'results')
+    assert not (tmp_path / 'results').exists()
     assert not (pipeline.root / 'exports').exists()

@@ -1099,6 +1099,7 @@ class Pipeline:
                 receipt = results.materialize(
                     partial, stages=self.paths(manifest), sources=sources,
                     fingerprint=verification["fingerprint"], receipt_path=receipt_path,
+                    lower_conf=self.cfg["options"]["LOWER_CONF"],
                     guard=export_destination,
                     rename_snips=rename_snips, snip_chars=snip_chars,
                 )

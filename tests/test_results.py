@@ -18,7 +18,7 @@ def put_json(path, value):
 
 
 def build_case(tmp_path, descriptions=None):
-    stages = {name: tmp_path / name for name in ("detect", "snip", "exif", "box")}
+    stages = {name: tmp_path / name for name in ("detect", "snip", "predict", "exif", "box")}
     for path in stages.values():
         path.mkdir()
     descriptions = descriptions or [("originals/north/a.jpg", "animal"),
@@ -48,22 +48,30 @@ def build_case(tmp_path, descriptions=None):
             for rank in (1, 2):
                 table.append(dict(crop_id=crop, filename=crop, rand_name=crop, crop_file=crop,
                                   source_file=name, detection_index=0, class_rank=rank,
-                                  class_name="species", prob=.8 if rank == 1 else .2,
+                                  class_name="species", class_index=rank - 1, class_id=str(rank * 10),
+                                  prob=.8 if rank == 1 else .2,
                                   metadata_status="exported", date_time_orig="2026:01:02 03:04:05"))
     put_json(stages["detect"] / "md_out.json", dict(images=images,
              detection_categories={"1": "animal", "2": "person", "3": "vehicle"}))
     put_json(stages["snip"] / "snips/crop_manifest.json", dict(complete=True, errors=[], crops=crops))
     put_json(stages["box"] / "boxed/box_report.json", dict(complete=True, errors=[], draw=True,
-             subfolder=True, sort_policy="highest_confidence", images=box_rows))
+             subfolder=True, sort_policy="highest_confidence", suppression_policy=r.POLICY, images=box_rows))
     csv_path = stages["exif"] / "metadata/mewc_out.csv"
     csv_path.parent.mkdir()
     with csv_path.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=["crop_id", "filename", "rand_name", "crop_file",
-            "source_file", "detection_index", "class_rank", "class_name", "prob", "metadata_status", "date_time_orig"])
+            "source_file", "detection_index", "class_rank", "class_name", "class_index", "class_id",
+            "prob", "metadata_status", "date_time_orig"])
+        writer.writeheader()
+        writer.writerows(table)
+    prediction_fields = [field for field in writer.fieldnames
+                         if field not in {"metadata_status", "date_time_orig"}]
+    with (stages["predict"] / "mewc_out.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=prediction_fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(table)
     return dict(target=tmp_path / "delivery.partial", stages=stages, sources=sources,
-                fingerprint="verified-fixture", receipt_path=tmp_path / "private/receipt.json")
+                fingerprint="verified-fixture", receipt_path=tmp_path / "private/receipt.json", lower_conf=.05)
 
 
 @pytest.fixture
@@ -385,3 +393,160 @@ def test_unsafe_output_path_is_rejected(case):
     put_json(path, report)
     with pytest.raises(r.Invalid, match="Unsafe"):
         materialize(case)
+
+
+def change_route(case, source, category):
+    path = case["stages"]["box"] / "boxed/box_report.json"
+    report = json.loads(path.read_text())
+    row = next(row for row in report["images"] if row["source_file"] == source)
+    original = case["stages"]["box"] / row["output_file"]
+    row["output_file"] = "boxed/" + category + "/" + source
+    row["status"] = "copied" if category == "blank" else "rendered"
+    destination = case["stages"]["box"] / row["output_file"]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    original.rename(destination)
+    put_json(path, report)
+
+
+@pytest.mark.parametrize("source,category", [
+    ("originals/north/a.jpg", "person"),
+    ("originals/north/a.jpg", "vehicle"),
+    ("originals/north/a.jpg", "blank"),
+    ("originals/empty-camera/empty.jpg", "animal"),
+    ("originals/people/walker.jpg", "animal"),
+])
+def test_misrouted_box_report_is_rejected_before_publication(case, source, category):
+    change_route(case, source, category)
+    with pytest.raises(r.Invalid, match="routing"):
+        materialize(case)
+    assert not case["target"].exists()
+    assert not case["receipt_path"].exists()
+
+
+@pytest.mark.parametrize("damage", [
+    "prob", "nan-prob", "class_name", "class_index", "class_id", "class_rank",
+    "duplicate", "missing-class", "missing-column",
+])
+def test_final_exif_csv_must_preserve_all_prediction_rows(case, damage):
+    path = case["stages"]["exif"] / "metadata/mewc_out.csv"
+    with path.open(newline="") as stream:
+        reader = csv.DictReader(stream)
+        fields, rows = reader.fieldnames, list(reader)
+    if damage == "duplicate":
+        rows.append(dict(rows[0]))
+    elif damage == "missing-class":
+        rows.pop(0)  # Another class still accounts for the same crop.
+    elif damage == "missing-column":
+        fields.remove("prob")
+    else:
+        field = "prob" if damage == "nan-prob" else damage
+        rows[0][field] = {
+            "prob": "0.1", "nan-prob": "nan", "class_name": "another-species",
+            "class_index": "1", "class_id": "20", "class_rank": "2",
+        }[damage]
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    with pytest.raises(r.Invalid, match="prediction"):
+        materialize(case)
+    assert not case["target"].exists()
+    assert not case["receipt_path"].exists()
+
+
+def set_detections(case, detections):
+    path = case["stages"]["detect"] / "md_out.json"
+    doc = json.loads(path.read_text())
+    doc["images"][0]["detections"] = [
+        dict(category=category, conf=confidence, bbox=[.1, .1, .2, .2])
+        for category, confidence in detections]
+    put_json(path, doc)
+
+
+@pytest.mark.parametrize("confidence,threshold,category", [
+    (.59, .6, "blank"), (.6, .6, "person"), (.7, .6, "person"),
+    (0, 0, "person"), (1, 1, "person"), (.99, 1, "blank"),
+])
+def test_category_routing_uses_effective_threshold_and_inclusive_boundary(
+        tmp_path, confidence, threshold, category):
+    case = build_case(tmp_path, [("originals/camera/a.jpg", "blank")])
+    case["lower_conf"] = threshold
+    set_detections(case, [("2", confidence)])
+    if category != "blank":
+        change_route(case, "originals/camera/a.jpg", category)
+    materialize(case)
+    doc = json.loads((case["target"] / "camera/md_out.json").read_text())
+    assert doc["images"][0]["file"] == category + "/a.jpg"
+
+
+def test_category_route_rejects_cross_category_exact_maximum_tie(tmp_path):
+    case = build_case(tmp_path, [("originals/a.jpg", "person")])
+    set_detections(case, [("2", .8), ("3", .8)])
+    with pytest.raises(r.Invalid, match="exact cross-category tie"):
+        materialize(case)
+    assert not case["target"].exists()
+    assert not case["receipt_path"].exists()
+
+
+def test_same_category_ties_and_lower_confidence_other_categories_are_valid(tmp_path):
+    case = build_case(tmp_path, [("originals/a.jpg", "person")])
+    # Identical same-category boxes can be suppressed; the category maximum and
+    # global route remain unchanged. Lower-confidence vehicles cannot win.
+    set_detections(case, [("2", .8), ("2", .8), ("3", .7)])
+    assert materialize(case)["complete"]
+
+
+def test_category_routing_rejects_nonwinning_category_in_mixed_image(case):
+    set_detections(case, [("1", .9), ("2", .95)])
+    with pytest.raises(r.Invalid, match="routing"):
+        materialize(case)
+    change_route(case, "originals/north/a.jpg", "person")
+    assert materialize(case)["complete"]
+
+
+def test_routing_requires_the_proven_suppression_policy(case):
+    path = case["stages"]["box"] / "boxed/box_report.json"
+    report = json.loads(path.read_text())
+    report["suppression_policy"] = "legacy-matryoshka-v1"
+    put_json(path, report)
+    with pytest.raises(r.Invalid, match="requires category-confidence-v1"):
+        materialize(case)
+
+
+def test_threshold_is_bound_to_resumable_receipt(tmp_path):
+    case = build_case(tmp_path, [("originals/a.jpg", "blank")])
+    materialize(case)
+    case["lower_conf"] = .6
+    with pytest.raises(r.Invalid, match="does not belong"):
+        materialize(case)
+
+
+@pytest.mark.parametrize("threshold", [True, None, -.1, 1.1, float("nan"), float("inf")])
+def test_invalid_routing_threshold_is_rejected(case, threshold):
+    case["lower_conf"] = threshold
+    with pytest.raises(r.Invalid, match="Invalid configured LOWER_CONF"):
+        materialize(case)
+
+
+def test_final_exif_csv_allows_reordered_rows_and_extra_metadata(case):
+    path = case["stages"]["exif"] / "metadata/mewc_out.csv"
+    with path.open(newline="") as stream:
+        reader = csv.DictReader(stream)
+        fields, rows = reader.fieldnames, list(reader)
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=[*fields, "flash_fired"])
+        writer.writeheader()
+        writer.writerows({**row, "flash_fired": "False"} for row in reversed(rows))
+    assert materialize(case)["complete"]
+
+
+def test_changed_predictor_csv_during_copy_does_not_complete_receipt(case):
+    source = case["stages"]["predict"] / "mewc_out.csv"
+
+    def guard(path):
+        if path == case["target"]:
+            source.write_text("changed after verification")
+
+    with pytest.raises(r.Invalid, match="changed"):
+        materialize(case, guard=guard)
+    assert json.loads(case["receipt_path"].read_text())["complete"] is False

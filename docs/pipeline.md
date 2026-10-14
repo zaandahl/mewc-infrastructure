@@ -199,6 +199,21 @@ EXIF-enriched image metadata; blanks are copied without boxes. MegaDetector's
 standard renderer uses red for animals, blue for people and gold for vehicles.
 Images in each category keep their original basenames. Detector image paths
 and CSV source paths point to the category files within that camera leaf.
+Before publication, each reported category is checked against the verified
+MegaDetector detections and the run's effective `LOWER_CONF`. Under the pinned
+`category-confidence-v1` policy, suppression is within-category and processes
+higher-confidence detections first, so it cannot remove a category's maximum
+without retaining an equal or higher maximum. The winning category, blank status
+and cross-category maximum ties can therefore be checked without duplicating the
+geometric suppression algorithm. Other suppression policies are rejected for
+standard export. The configured threshold is bound into the export receipt.
+
+The final CSV must preserve the complete multiset of verified predictor rows
+across every predictor column before presentation paths/names are rewritten.
+Added EXIF metadata and row reordering are allowed; altered class codes, names,
+probabilities or ranks, missing classes and duplicate rows are rejected. The
+predictor CSV is included in the artifact hashes rechecked during export.
+
 Image-bearing branches mixed with image-bearing descendants are rejected;
 organize the source as image-bearing leaves before running the pipeline. Every
 leaf must contain at least one JPEG; empty leaves and case-insensitive image

@@ -9,16 +9,19 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import secrets
 import shutil
 import stat
 import string
 import tempfile
+from collections import Counter
 from pathlib import Path, PurePosixPath
 
 DIRECTORIES = ("animal", "blank", "person", "snips", "vehicle")
 FORMAT = "mewc-standard-v1"
+POLICY = "category-confidence-v1"
 
 
 class Invalid(ValueError):
@@ -186,15 +189,38 @@ def _unprefix(name):
     return _relative(name).removeprefix("originals/")
 
 
-def _load_sources(stages, sources):
+def _expected_category(image, categories, lower_conf):
+    # The pinned category-confidence-v1 policy suppresses only within category,
+    # highest confidence first. A category maximum always survives. Therefore
+    # suppression cannot change the winning category, blank status or a tie;
+    # only LOWER_CONF affects routing. Do not reimplement the geometric policy.
+    detections = image.get("detections")
+    _require(isinstance(detections, list) and not image.get("failure"),
+             "Invalid detector image for routing")
+    for detection in detections:
+        confidence = detection.get("conf")
+        _require(detection.get("category") in categories
+                 and type(confidence) in (int, float) and math.isfinite(confidence)
+                 and 0 <= confidence <= 1, "Invalid detector category/confidence for routing")
+    eligible = [d for d in detections if d["conf"] >= lower_conf]
+    if not eligible:
+        return "blank"
+    maximum = max(d["conf"] for d in eligible)
+    winners = {d["category"] for d in eligible if d["conf"] == maximum}
+    _require(len(winners) == 1, "Highest-confidence routing has an exact cross-category tie")
+    return categories[winners.pop()]
+
+
+def _load_sources(stages, sources, lower_conf):
     _require(isinstance(sources, dict) and sources, "Verified source images are required")
     names = {_relative(name) for name in sources}
     leaf_map = _leaf_map(names)
-    paths = {stage: _path(stages[stage]) for stage in ("detect", "snip", "exif", "box")}
+    paths = {stage: _path(stages[stage]) for stage in ("detect", "snip", "predict", "exif", "box")}
     detector_path = _file(paths["detect"] / "md_out.json")
     crop_manifest_path = _file(paths["snip"] / "snips/crop_manifest.json")
     box_report_path = _file(paths["box"] / "boxed/box_report.json")
     csv_path = _file(paths["exif"] / "metadata/mewc_out.csv")
+    prediction_path = _file(paths["predict"] / "mewc_out.csv")
     detector, crops, report = (_json(p) for p in (detector_path, crop_manifest_path, box_report_path))
     _require(isinstance(detector.get("images"), list), "Detector image list is missing")
     images = {item["file"]: item for item in detector["images"]}
@@ -205,6 +231,10 @@ def _load_sources(stages, sources):
     _require(report.get("complete") is True and not report.get("errors") and report.get("draw") is True
              and report.get("subfolder") is True and report.get("sort_policy") == "highest_confidence",
              "Standard output requires complete drawn category output with highest-confidence routing")
+    _require(report.get("suppression_policy") == POLICY,
+             "Standard routing requires category-confidence-v1 suppression")
+    expected_routes = {name: _expected_category(image, detector["detection_categories"], lower_conf)
+                       for name, image in images.items()}
     rows = report.get("images", [])
     _require(len(rows) == len(names) and {row.get("source_file") for row in rows} == names,
              "Box report/source identity set differs")
@@ -216,6 +246,8 @@ def _load_sources(stages, sources):
         _require(len(parts) >= 3 and parts[0] == "boxed" and parts[1] in set(DIRECTORIES) - {"snips"},
                  "Box output has an unrecognized image category")
         category = parts[1]
+        _require(category == expected_routes[source],
+                 "Box routing differs from detector categories and configured LOWER_CONF")
         _require(PurePosixPath(*parts[2:]).as_posix() == source, "Box output/source identity differs")
         _require(row.get("status") == ("copied" if category == "blank" else "rendered"),
                  "Expected rendered detections or an unchanged blank image")
@@ -245,17 +277,33 @@ def _load_sources(stages, sources):
     _require(set(_inventory(paths["snip"] / "snips")[0]) == set(crop_files) | {"crop_manifest.json"},
              "Unexpected files in snip output")
     artifacts = {str(p): {"sha256": _sha(p), "size": p.stat().st_size}
-                 for p in (detector_path, crop_manifest_path, box_report_path, csv_path, *files.values(), *crop_files.values())}
-    return detector, csv_path, files, routed, crop_files, crop_keys, artifacts, leaf_map
+                 for p in (detector_path, crop_manifest_path, box_report_path, csv_path, prediction_path, *files.values(), *crop_files.values())}
+    return detector, csv_path, prediction_path, files, routed, crop_files, crop_keys, artifacts, leaf_map
 
 
-def _tables(path, routed, crop_keys, random_names, leaf_map):
+def _tables(path, prediction_path, routed, crop_keys, random_names, leaf_map):
     with _file(path).open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream)
         fields, rows = reader.fieldnames, list(reader)
     required = {"crop_id", "filename", "rand_name", "source_file", "detection_index", "metadata_status"}
     _require(fields is not None and len(fields) == len(set(fields)) and required.issubset(fields),
              "Final EXIF-enriched prediction CSV lacks identity/metadata columns")
+    with _file(prediction_path).open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        prediction_fields, predictions = reader.fieldnames, list(reader)
+    _require(prediction_fields and len(prediction_fields) == len(set(prediction_fields))
+             and set(prediction_fields).issubset(fields),
+             "Final EXIF table is missing verified prediction columns")
+    _require(all(None not in row and all(value is not None for value in row.values())
+                 for row in [*predictions, *rows]), "Malformed prediction CSV")
+    # Compare the complete row multiset before presentation changes. This keeps
+    # every class/probability/rank and catches missing or duplicated class rows,
+    # while permitting EXIF columns and a different row order.
+    def original_values(row):
+        return tuple(row[field] for field in prediction_fields)
+
+    _require(Counter(map(original_values, predictions)) == Counter(map(original_values, rows)),
+             "Final EXIF table changed verified prediction rows")
     seen, grouped = set(), {leaf: [] for leaf in leaf_map.values()}
     for row in rows:
         _require(None not in row and all(value is not None for value in row.values()), "Malformed final prediction CSV")
@@ -328,20 +376,24 @@ def verify(target, receipt):
             "fingerprint": receipt["fingerprint"]}
 
 
-def materialize(target, *, stages, sources, fingerprint, receipt_path, guard=None,
+def materialize(target, *, stages, sources, fingerprint, receipt_path, lower_conf, guard=None,
                 rename_snips=True, snip_chars=16):
     """Build/resume an ordinary result tree; caller atomically publishes it.
 
     ``stages`` and ``sources`` must come from the controller's successful
     verification. ``receipt_path`` must be outside ``target``; retries require
-    that same receipt. No pipeline artifact or supplied source is modified.
+    that same receipt. ``lower_conf`` must be the verified effective LOWER_CONF
+    for category-confidence-v1. No pipeline artifact or supplied source is modified.
     """
     target, receipt_path = _path(target), _path(receipt_path)
     _require(not receipt_path.is_relative_to(target), "Result receipt must remain outside the delivered tree")
     _require(type(rename_snips) is bool and type(snip_chars) is int and 8 <= snip_chars <= 128,
              "Invalid result snip naming settings")
     _require(isinstance(fingerprint, str) and fingerprint, "Verified run fingerprint is required")
-    detector, csv_path, files, routed, crops, crop_keys, artifacts, leaf_map = _load_sources(stages, sources)
+    _require(type(lower_conf) in (int, float) and math.isfinite(lower_conf)
+             and 0 <= lower_conf <= 1, "Invalid configured LOWER_CONF for routing")
+    detector, csv_path, prediction_path, files, routed, crops, crop_keys, artifacts, leaf_map = _load_sources(
+        stages, sources, lower_conf)
     leaves = sorted(set(leaf_map.values()))
     for source_root in {Path(stage) for stage in stages.values()}:
         _require(not target.is_relative_to(source_root) and not source_root.is_relative_to(target),
@@ -349,7 +401,7 @@ def materialize(target, *, stages, sources, fingerprint, receipt_path, guard=Non
         _require(not receipt_path.is_relative_to(source_root),
                  "Result receipt must not modify immutable stage artifacts")
     identity = {"fingerprint": fingerprint, "partial_destination": str(target),
-                "rename_snips": rename_snips, "snip_chars": snip_chars,
+                "rename_snips": rename_snips, "snip_chars": snip_chars, "lower_conf": lower_conf,
                 "sources_digest": hashlib.sha256(_canonical({"sources": sources, "artifacts": artifacts})).hexdigest()}
     previous = _json(receipt_path) if receipt_path.exists() else None
     _require(not target.exists() or previous is not None,
@@ -394,7 +446,7 @@ def materialize(target, *, stages, sources, fingerprint, receipt_path, guard=Non
             _require(name == _crop_local(crop, leaf_map[crop_keys[crop][0]]), "Nonrandom snip filename differs")
         files[_join(leaf_map[crop_keys[crop][0]], "snips/" + name)] = crops[crop]
     detector.pop("mewc_path_rebase", None)
-    generated = _tables(csv_path, routed, crop_keys, random_names, leaf_map)
+    generated = _tables(csv_path, prediction_path, routed, crop_keys, random_names, leaf_map)
     for leaf in leaves:
         document = {key: value for key, value in detector.items() if key != "images"}
         document["images"] = [{**image, "file": routed[image["file"]]}
