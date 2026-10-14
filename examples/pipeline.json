@@ -27,6 +27,7 @@
     "SNIP_SIZE": 600,
     "BATCH_SIZE": 16,
     "DRAW": true,
+    "SORT_POLICY": "highest_confidence",
     "TOP_CLASSES": true
   },
   "gpu": true,

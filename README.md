@@ -16,6 +16,13 @@ The complete command-line inference workflow is documented in
 locked companion commits, preserves original images and class codes, and verifies
 crops, predictions, metadata and review copies before export.
 
+The default export is the ordinary camera result: `md_out.json`, the final
+EXIF-enriched `mewc_out.csv`, and `animal/`, `blank/`, `person/`, `snips/`,
+`vehicle/`. Finished images are returned once; snips receive random names with
+their mapping in the CSV. Detailed provenance, intermediate files and logs stay
+in the run directory. Use `export --mode audit` only when that larger diagnostic
+bundle is wanted. Both forms retain hash verification.
+
 | Profile | Scope |
 | --- | --- |
 | `cpu` | Verified volume and Docker/containerd host. |

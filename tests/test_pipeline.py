@@ -1,5 +1,7 @@
 """Orchestration failure tests; no Docker, ML runtime, cloud, or private data."""
 import json
+import csv
+import re
 import shutil
 from pathlib import Path
 import pytest
@@ -68,8 +70,8 @@ class FakePipeline(r.Pipeline):
                      images=[dict(source_file=source, status='complete')]))
         elif stage == 'predict':
             (attempt / 'mewc_out.pkl').write_bytes(b'fixture-only-pickle')
-            (attempt / 'mewc_out.csv').write_text('crop_id,rand_name,source_file,detection_index,class_index,class_id,class_name,prob,class_rank\n' +
-                ('' if self.empty else f'{crop},{crop},{source},0,0,0,animal,1.0,1\n'))
+            (attempt / 'mewc_out.csv').write_text('crop_id,filename,rand_name,source_file,detection_index,class_index,class_id,class_name,prob,class_rank\n' +
+                ('' if self.empty else f'{crop},{crop},{crop},{source},0,0,0,animal,1.0,1\n'))
             (attempt / 'prediction_scores.npz').write_bytes(b'fixture-scores')
             paths = self.paths(r.read(self.manifest_path))
             r.atomic(attempt / 'prediction_manifest.json', dict(schema_version=1, complete=True,
@@ -83,12 +85,22 @@ class FakePipeline(r.Pipeline):
             r.atomic(attempt / 'metadata/metadata.json', dict(schema_version=1, complete=True, errors=[],
                      images=[dict(source_file=source, status='no_animal' if self.empty else 'exported',
                                   source_sha256=r.sha(self.root / 'inputs/nested/a.jpg'))]))
+            paths = self.paths(r.read(self.manifest_path))
+            with (paths['predict'] / 'mewc_out.csv').open(newline='') as stream:
+                reader = csv.DictReader(stream)
+                fields, rows = reader.fieldnames, list(reader)
+            with (attempt / 'metadata/mewc_out.csv').open('w', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=fields + ['metadata_status'])
+                writer.writeheader()
+                writer.writerows({**row, 'metadata_status': 'exported'} for row in rows)
         elif stage == 'box':
-            path = attempt / 'boxed/animal' / source
+            path = attempt / ('boxed/blank' if self.empty else 'boxed/animal') / source
             path.parent.mkdir(parents=True)
             path.write_bytes(b'boxed')
             r.atomic(attempt / 'boxed/box_report.json', dict(schema_version=1, complete=True, errors=[],
-                     images=[dict(source_file=source, status='copied', output_file=path.relative_to(attempt).as_posix())]))
+                     draw=True, subfolder=True, sort_policy='highest_confidence', suppression_policy=r.POLICY,
+                     images=[dict(source_file=source, status='copied' if self.empty else 'rendered',
+                                  output_file=path.relative_to(attempt).as_posix())]))
         (self.root / 'logs').mkdir(exist_ok=True)
 
 
@@ -127,6 +139,24 @@ def test_changed_source_refuses_same_run_identity(cfg):
     (Path(cfg['input_dir']) / 'nested/a.jpg').write_bytes(b'changed')
     with pytest.raises(r.Invalid, match='Run identity changed'):
         pipeline.run()
+
+
+@pytest.mark.parametrize('damage', ['branch-image', 'empty-leaf', 'case-collision', 'directory-case-collision'])
+def test_input_layout_fails_before_container_execution(cfg, damage):
+    source = Path(cfg['input_dir'])
+    if damage == 'branch-image':
+        (source / 'root.jpg').write_bytes(b'fixture')
+    elif damage == 'empty-leaf':
+        (source / 'empty').mkdir()
+    elif damage == 'case-collision':
+        (source / 'nested/A.JPG').write_bytes(b'fixture')
+    else:
+        (source / 'Nested').mkdir()
+        (source / 'Nested/b.jpg').write_bytes(b'fixture')
+    pipeline = FakePipeline(cfg)
+    with pytest.raises(r.Invalid):
+        pipeline.run()
+    assert pipeline.calls == []
 
 
 def test_modified_model_snapshot_cannot_verify(cfg):
@@ -170,10 +200,10 @@ def test_crop_missing_identity_not_hidden_by_equal_counts(cfg):
 def test_export_verified_and_transfer_damage_detected(cfg, tmp_path):
     pipeline = FakePipeline(cfg); pipeline.run()
     target = tmp_path / 'export'
-    assert pipeline.export(target)['complete']
-    assert r.main(['verify-export', '--destination', str(target)]) == 0
+    assert pipeline.export(target, mode='audit')['complete']
+    assert r.main(['verify-export', '--mode', 'audit', '--destination', str(target)]) == 0
     (target/'mewc_out.csv').write_bytes(b'damaged')
-    assert r.main(['verify-export', '--destination', str(target)]) == 1
+    assert r.main(['verify-export', '--mode', 'audit', '--destination', str(target)]) == 1
 
 
 @pytest.mark.parametrize('kind', ['foreign', 'symlink'])
@@ -183,7 +213,7 @@ def test_export_rejects_unowned_partial(cfg, tmp_path, kind):
     if kind == 'symlink': partial.symlink_to(Path(cfg['input_dir']), target_is_directory=True)
     else:
         partial.mkdir(); (partial/'foreign').write_text('preserve')
-    with pytest.raises(r.Invalid): pipeline.export(target)
+    with pytest.raises(r.Invalid): pipeline.export(target, mode='audit')
 
 
 def test_export_corrupted_copy_is_not_self_certified(cfg, tmp_path, monkeypatch):
@@ -195,8 +225,44 @@ def test_export_corrupted_copy_is_not_self_certified(cfg, tmp_path, monkeypatch)
         return result
     monkeypatch.setattr(shutil, 'copy2', corrupt)
     with pytest.raises(r.Invalid, match='Export copy differs'):
-        pipeline.export(tmp_path/'export')
+        pipeline.export(tmp_path/'export', mode='audit')
     assert not (tmp_path/'export').exists()
+
+
+@pytest.mark.parametrize('empty', [False, True])
+def test_default_camera_results_and_external_receipt(cfg, tmp_path, empty):
+    pipeline = FakePipeline(cfg, empty=empty)
+    pipeline.run()
+    target = tmp_path / 'camera-results'
+    exported = pipeline.export(target)
+    assert exported['mode'] == 'standard'
+    assert {p.name for p in target.iterdir()} == {'nested'}
+    leaf = target / 'nested'
+    assert {p.name for p in leaf.iterdir()} == {
+        'md_out.json', 'mewc_out.csv', 'animal', 'blank', 'person', 'snips', 'vehicle'}
+    assert {p.name for p in leaf.iterdir() if p.is_dir()} == set(r.results.DIRECTORIES)
+    detection = r.read(leaf / 'md_out.json')
+    category = 'blank' if empty else 'animal'
+    assert detection['images'][0]['file'] == f'{category}/a.jpg'
+    assert (leaf / detection['images'][0]['file']).is_file()
+    with (leaf / 'mewc_out.csv').open(newline='') as stream:
+        reader = csv.DictReader(stream)
+        rows = list(reader)
+        assert 'metadata_status' in reader.fieldnames
+    if empty:
+        assert not rows and not list((leaf / 'snips').iterdir())
+    else:
+        assert rows[0]['metadata_status'] == 'exported'
+        assert rows[0]['source_file'] == 'animal/a.jpg'
+        assert re.fullmatch(r'[A-Za-z0-9]{16}\.jpg', rows[0]['rand_name'])
+        assert (leaf / 'snips' / rows[0]['rand_name']).read_bytes() == b'crop'
+    assert not Path(exported['receipt']).is_relative_to(target)
+    assert r.main(['verify-export', '--destination', str(target), '--receipt', exported['receipt']]) == 0
+    before = r.inventory(target)
+    assert pipeline.export(target)['complete']
+    assert r.inventory(target) == before
+    (target / 'unexpected.log').write_text('extra')
+    assert r.main(['verify-export', '--destination', str(target), '--receipt', exported['receipt']]) == 1
 
 
 def test_snapshot_rejects_symlink_partial(tmp_path):
@@ -298,3 +364,61 @@ def test_validator_has_writable_temporary_directory_and_readonly_artifacts(cfg, 
     assert f'type=bind,src={attempt},dst=/images' in commands[1]
     assert 'TMPDIR=/images/.tmp' in commands[1]
     assert env == {'TMPDIR': '/images/.tmp'}
+
+
+@pytest.mark.parametrize('kind', ['relative', 'parent-traversal', 'symlink', 'run', 'input', 'ancestor'])
+def test_standard_export_rejects_unsafe_destination(cfg, tmp_path, kind):
+    pipeline = FakePipeline(cfg)
+    pipeline.run()
+    target = tmp_path / 'new-results'
+    if kind == 'relative':
+        target = Path('relative-results')
+    elif kind == 'parent-traversal':
+        target = tmp_path / 'missing' / '..' / 'new-results'
+    elif kind == 'symlink':
+        alias = tmp_path / 'alias'
+        alias.symlink_to(Path(cfg['input_dir']), target_is_directory=True)
+        target = alias / 'new-results'
+    elif kind == 'run':
+        target = pipeline.root / 'new-results'
+    elif kind == 'input':
+        target = Path(cfg['input_dir']) / 'new-results'
+    elif kind == 'ancestor':
+        target = tmp_path
+    with pytest.raises(r.Invalid):
+        pipeline.export(target)
+    assert not (pipeline.root / 'exports').exists()
+    assert not (tmp_path / 'new-results').exists()
+
+
+def test_standard_export_rechecks_storage_after_verification(cfg, tmp_path, monkeypatch):
+    pipeline = FakePipeline(cfg)
+    pipeline.run()
+    verify = pipeline.verify
+
+    def unavailable():
+        raise r.Invalid('retained storage withdrawn')
+
+    def verify_then_withdraw():
+        result = verify()
+        monkeypatch.setattr(pipeline, 'storage', unavailable)
+        return result
+
+    monkeypatch.setattr(pipeline, 'verify', verify_then_withdraw)
+    target = tmp_path / 'export-parent' / 'results'
+    with pytest.raises(r.Invalid, match='retained storage withdrawn'):
+        pipeline.export(target)
+    assert not target.parent.exists()
+    assert not (pipeline.root / 'exports').exists()
+
+
+def test_standard_export_uses_configured_detection_threshold(cfg, tmp_path):
+    cfg['options']['LOWER_CONF'] = .9
+    pipeline = FakePipeline(cfg)
+    pipeline.run()
+    # The fake boxer incorrectly calls its .8-confidence detection an animal.
+    # The exporter must use this run's .9 threshold rather than its default.
+    with pytest.raises(r.Invalid, match='routing'):
+        pipeline.export(tmp_path / 'results')
+    assert not (tmp_path / 'results').exists()
+    assert not (pipeline.root / 'exports').exists()
